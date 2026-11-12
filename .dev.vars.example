@@ -1,0 +1,13 @@
+# Copy to .dev.vars for local development:  cp .dev.vars.example .dev.vars
+# .dev.vars is git-ignored. Production values are set with `npx wrangler secret put <NAME>`.
+
+# Cloudflare Turnstile test secret: always passes.
+# Use 2x0000000000000000000000000000000AA to simulate a failing check.
+TURNSTILE_SECRET=1x0000000000000000000000000000000AA
+
+# Only needed when EMAIL_MODE=resend
+RESEND_API_KEY=
+
+
+# Local only: pretend to be this Access user on /admin (ignored unless APP_ENV=development)
+DEV_ADMIN_EMAIL=admin@example.com
