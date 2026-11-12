@@ -1,0 +1,121 @@
+/**
+ * PPME Den Haag – event registration (Cloudflare Workers + React Router SSR)
+ * Docs: https://developers.cloudflare.com/workers/wrangler/configuration/
+ *
+ * ENVIRONMENTS (vars and d1_databases are NOT inherited, so each block repeats them):
+ *   (top level)  local development: D1 is emulated by Miniflare, secrets come from `.dev.vars`
+ *   test         TEMPORARY public test Worker  `ppme-registration`        on workers.dev, form only (/admin is 404)
+ *   test-admin   TEMPORARY admin for the test  `ppme-registration-admin`  on workers.dev, /admin only, fully behind Cloudflare Access
+ *   production        (planned, not created) public form on event.ppmedenhaag.nl, ENABLE_ADMIN=false, cron, its own NEW clean D1
+ *   production-admin  (planned, not created) admin + later the scanner on event-admin.ppmedenhaag.nl, ENABLE_PUBLIC=false, no cron,
+ *                     one Access application on the whole host, same new D1. See docs/deploy-runbook.md (Track 2) and docs/dns-migration-todo.md.
+ * Secrets are per Worker: wrangler secret put <NAME> --env <env>   (test: TURNSTILE_SECRET + RESEND_API_KEY; test-admin: RESEND_API_KEY)
+ * Feature switches (string "false" turns one off, anything else = on): ENABLE_PUBLIC (form) and ENABLE_ADMIN (/admin).
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "ppme-registration",
+	"compatibility_date": "2026-11-10",
+	"compatibility_flags": ["nodejs_compat"],
+	"main": "./workers/app.ts",
+	"observability": { "enabled": true },
+	"upload_source_maps": true,
+
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "ppme-registration",
+			"database_id": "8f86ce98-349d-4445-8cf5-4b0c9fa55287",
+			"migrations_dir": "migrations"
+		}
+	],
+
+	// Payment deadline job: expiry, reminders, email retries. (Inherited by `test`; `test-admin` turns it off.)
+	"triggers": { "crons": ["*/5 * * * *"] },
+
+	"vars": {
+		"APP_ENV": "development",
+		"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
+		// Cloudflare test site key: always passes. Replace for production.
+		"TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
+		// "log" = store emails in the local outbox (viewable at /admin/outbox); "resend" = send via Resend.
+		"EMAIL_MODE": "log",
+		"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
+		"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
+		// Bank details shown to non-members. Public information (donation account), so plain config, not secrets.
+		"BANK_ACCOUNT_NAME": "PPME Den Haag (contoh)",
+		"BANK_IBAN": "NL00 TEST 0000 0000 00",
+		// One-time seed: only used to fill the `admins` table while it is empty. After that admins are managed in /admin/admins.
+		"ADMIN_EMAILS": "",
+		// Cloudflare Access (deployed environments). Leave empty in development.
+		"ACCESS_TEAM_DOMAIN": "",
+		"ACCESS_AUD": ""
+	},
+
+	"env": {
+		// ---- TEST: public form on workers.dev. Built with CLOUDFLARE_ENV=test (`npm run deploy:test`).
+		"test": {
+			"name": "ppme-registration",
+			// TEMPORARY: served on the free workers.dev address.
+			"workers_dev": true,
+			// Preview URLs would be extra public hostnames for the same app (and Turnstile would not know them).
+			"preview_urls": false,
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "ppme-registration",
+					"database_id": "8f86ce98-349d-4445-8cf5-4b0c9fa55287",
+					"migrations_dir": "migrations"
+				}
+			],
+			"vars": {
+				"APP_ENV": "production",
+				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
+				// Cloudflare Access cannot protect only /admin on workers.dev, so the admin lives on the `test-admin` Worker.
+				"ENABLE_ADMIN": "false",
+				"TURNSTILE_SITE_KEY": "0x4AAAAAAF9STdC9uclCsE_i",
+				// Public bank account of the association (a donation account), so plain config, not secrets.
+				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
+				"BANK_IBAN": "NL26 INGB 0002 1661 44",
+				"EMAIL_MODE": "resend",
+				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
+				"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
+				"ADMIN_EMAILS": "",
+				"ACCESS_TEAM_DOMAIN": "",
+				"ACCESS_AUD": ""
+			}
+		},
+
+		// ---- TEST-ADMIN: /admin only, on its own workers.dev address, protected as a whole by Cloudflare Access
+		// (Worker > Settings > Domains & Routes > workers.dev > "Enable Cloudflare Access"). Same database as `test`.
+		// Until ACCESS_TEAM_DOMAIN and ACCESS_AUD are filled in, /admin fails closed (403).
+		"test-admin": {
+			"name": "ppme-registration-admin",
+			"workers_dev": true,
+			"preview_urls": false,
+			// The 5-minute job runs on the `test` Worker only.
+			"triggers": { "crons": [] },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "ppme-registration",
+					"database_id": "8f86ce98-349d-4445-8cf5-4b0c9fa55287",
+					"migrations_dir": "migrations"
+				}
+			],
+			"vars": {
+				"APP_ENV": "production",
+				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
+				"ENABLE_PUBLIC": "false",
+				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
+				"BANK_IBAN": "NL26 INGB 0002 1661 44",
+				"EMAIL_MODE": "resend",
+				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
+				"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
+				"ADMIN_EMAILS": "",
+				"ACCESS_TEAM_DOMAIN": "dry-field-4723.cloudflareaccess.com",
+				"ACCESS_AUD": "24ee5629aa0191c16db49aeff70a4de16770147c7aafeecfec96f9f1aeb770a4"
+			}
+		}
+	}
+}

@@ -1,0 +1,71 @@
+import { addAdmin, removeAdmin } from "./admins.server";
+import { updateRegistrationWindow } from "./events.server";
+import { emailConfig, type AppEnv } from "./config.server";
+import { audit, getEventBySlug } from "./db.server";
+import { deliverEmail, type EmailKind } from "./email/send.server";
+import { runDeadlineJob } from "./jobs.server";
+import { confirmPayment, setMembershipVerified } from "./payments.server";
+
+export type AdminActionResult = { ok: boolean; message: string };
+
+const EMAIL_KINDS: EmailKind[] = ["confirmation", "payment_instructions", "reminder", "expired"];
+
+/** Shared POST handler for admin pages. `intent` selects the operation. */
+export async function handleAdminIntent(env: AppEnv, actor: string, form: FormData): Promise<AdminActionResult> {
+  const intent = String(form.get("intent") ?? "");
+  const id = String(form.get("registrationId") ?? "");
+  const cfg = emailConfig(env);
+
+  switch (intent) {
+    case "confirm-payment": {
+      const res = await confirmPayment(env.DB, id, actor);
+      if (!res.ok) return res;
+      // Send the QR email synchronously so the admin sees whether it went out.
+      const mail = await deliverEmail(env.DB, cfg, id, "confirmation");
+      return {
+        ok: true,
+        message: mail.ok
+          ? `${res.message} ${mail.skipped ? "Email QR code sudah dikirim atau sedang diproses." : "Email QR code telah dikirim."}`
+          : `${res.message} Namun email QR gagal dikirim (${mail.error}). Sistem akan mencoba lagi otomatis.`,
+      };
+    }
+    case "verify-membership":
+      return setMembershipVerified(env.DB, id, actor, true);
+    case "unverify-membership":
+      return setMembershipVerified(env.DB, id, actor, false);
+    case "resend-email": {
+      const kind = String(form.get("kind") ?? "") as EmailKind;
+      if (!EMAIL_KINDS.includes(kind)) return { ok: false, message: "Jenis email tidak dikenal." };
+      const mail = await deliverEmail(env.DB, cfg, id, kind, { force: true });
+      await audit(env.DB, actor, "email.resend", id, { kind, ok: mail.ok });
+      return mail.ok
+        ? { ok: true, message: "Email dikirim ulang." }
+        : { ok: false, message: `Email gagal dikirim: ${mail.error}` };
+    }
+    case "add-admin":
+      return addAdmin(env.DB, actor, String(form.get("email") ?? ""), String(form.get("name") ?? ""));
+    case "remove-admin":
+      return removeAdmin(env.DB, actor, String(form.get("email") ?? ""));
+    case "save-event-settings": {
+      const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");
+      if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+      return updateRegistrationWindow(
+        env.DB,
+        actor,
+        event.id,
+        String(form.get("opensAt") ?? ""),
+        String(form.get("closesAt") ?? ""),
+      );
+    }
+    case "run-job": {
+      const report = await runDeadlineJob(env.DB, cfg);
+      await audit(env.DB, actor, "job.run", null, report);
+      return {
+        ok: true,
+        message: `Job selesai: ${report.expired} kedaluwarsa, ${report.reminders} pengingat, ${report.retried} email dicoba ulang.`,
+      };
+    }
+    default:
+      return { ok: false, message: "Aksi tidak dikenal." };
+  }
+}

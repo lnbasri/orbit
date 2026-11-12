@@ -1,0 +1,55 @@
+import type { EmailConfig } from "./email/send.server";
+
+/** Settings read from Worker vars/secrets. Kept in one place so routes, cron and tests agree. */
+export interface AppEnv {
+  DB: D1Database;
+  APP_ENV?: string;
+  DEFAULT_EVENT_SLUG?: string;
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET?: string;
+  EMAIL_MODE?: string;
+  EMAIL_FROM?: string;
+  EMAIL_REPLY_TO?: string;
+  RESEND_API_KEY?: string;
+  BANK_ACCOUNT_NAME?: string;
+  BANK_IBAN?: string;
+  /** Seed list for the admins table (first run only). */
+  ADMIN_EMAILS?: string;
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
+  DEV_ADMIN_EMAIL?: string;
+  /** "false" turns the public registration form off on this Worker (admin-only Worker). */
+  ENABLE_PUBLIC?: string;
+  /** "false" turns /admin off on this Worker (public-only Worker). */
+  ENABLE_ADMIN?: string;
+}
+
+/** Which parts of the app this Worker serves. Anything other than the string "false" means on. */
+export function featureEnabled(env: Pick<AppEnv, "ENABLE_PUBLIC" | "ENABLE_ADMIN">, feature: "public" | "admin") {
+  return (feature === "public" ? env.ENABLE_PUBLIC : env.ENABLE_ADMIN)?.trim().toLowerCase() !== "false";
+}
+
+export function isDev(env: AppEnv) {
+  return env.APP_ENV === "development";
+}
+
+export function emailConfig(env: AppEnv): EmailConfig {
+  return {
+    mode: env.EMAIL_MODE === "resend" ? "resend" : "log",
+    from: env.EMAIL_FROM ?? "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
+    replyTo: env.EMAIL_REPLY_TO ?? "kajian@ppmedenhaag.nl",
+    resendApiKey: env.RESEND_API_KEY,
+    bank: bankInfo(env),
+  };
+}
+
+/** True when real bank details are configured (non-empty and not a template placeholder). */
+export function bankConfigured(env: AppEnv) {
+  const { accountName, iban } = bankInfo(env);
+  const placeholder = (v: string) => !v.trim() || /REPLACE_WITH/i.test(v);
+  return !placeholder(accountName) && !placeholder(iban);
+}
+
+export function bankInfo(env: AppEnv) {
+  return { accountName: env.BANK_ACCOUNT_NAME ?? "", iban: env.BANK_IBAN ?? "" };
+}
