@@ -104,6 +104,10 @@ export async function removeAdmin(
       message: exists ? "Admin terakhir tidak dapat dihapus." : `${email} bukan admin.`,
     };
   }
-  await auditStatement(db, actor, "admin.remove", email, undefined, now.toISOString()).run();
+  // End their sessions too (the session lookup already requires an admins row; this keeps the table clean).
+  await db.batch([
+    db.prepare("DELETE FROM admin_sessions WHERE email = ?").bind(email),
+    auditStatement(db, actor, "admin.remove", email, undefined, now.toISOString()),
+  ]);
   return { ok: true, message: `${email} dihapus dari daftar admin.` };
 }

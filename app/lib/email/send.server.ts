@@ -30,6 +30,8 @@ export interface OutgoingEmail {
   to: string;
   subject: string;
   html: string;
+  /** Plain-text alternative (better deliverability and accessibility). */
+  text?: string;
   attachments: Attachment[];
 }
 
@@ -109,7 +111,7 @@ async function transport(
   db: D1Database,
   cfg: EmailConfig,
   msg: OutgoingEmail,
-  meta: { registrationId: string; kind: EmailKind; idempotencyKey: string },
+  meta: { registrationId: string | null; kind: string; idempotencyKey: string },
 ): Promise<string> {
   if (cfg.mode === "log") {
     const res = await db
@@ -144,6 +146,7 @@ async function transport(
       reply_to: cfg.replyTo,
       subject: msg.subject,
       html: msg.html,
+      ...(msg.text ? { text: msg.text } : {}),
       attachments: msg.attachments.map((a) => ({
         filename: a.filename,
         content: a.contentBase64,
@@ -155,6 +158,20 @@ async function transport(
   const body = (await response.json().catch(() => ({}))) as { id?: string; message?: string };
   if (!response.ok) throw new Error(`Resend ${response.status}: ${body.message ?? "unknown error"}`);
   return body.id ?? "";
+}
+
+/**
+ * Send an email that belongs to no registration (admin login codes). Deliberately NOT part of the outbox: a login code
+ * is short-lived and worthless after 10 minutes, so on failure the caller drops it and the user asks for a new one.
+ * EMAIL_MODE=log stores it in dev_outbox like every other email.
+ */
+export async function sendDirectEmail(
+  db: D1Database,
+  cfg: EmailConfig,
+  msg: OutgoingEmail,
+  meta: { kind: string; idempotencyKey: string },
+): Promise<string> {
+  return transport(db, cfg, msg, { registrationId: null, ...meta });
 }
 
 /** Another sender (fast path, cron, admin) that claimed a row less than this long ago owns it. */

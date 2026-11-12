@@ -1,6 +1,13 @@
 import { Menu, MenuButton, MenuItem, MenuItems, MenuSeparator } from "@headlessui/react";
-import { Bars3Icon, CheckIcon, UserCircleIcon, WrenchScrewdriverIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { Link, NavLink, useLocation } from "react-router";
+import {
+  ArrowRightStartOnRectangleIcon,
+  Bars3Icon,
+  CheckIcon,
+  UserCircleIcon,
+  WrenchScrewdriverIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline";
+import { Form, Link, NavLink, useLocation } from "react-router";
 
 import type { IconComponent } from "~/components/ui";
 
@@ -21,12 +28,26 @@ function isActive(item: AdminNavItem, pathname: string) {
  * Admin top bar. Below lg: logo, title and a dropdown menu (Headless UI Menu) holding the navigation and account.
  * From lg: one row with logo, title, inline tabs and the account chip.
  */
-export function AdminHeader({ items, email, dev }: { items: AdminNavItem[]; email: string; dev: boolean }) {
+const LOGOUT_FORM = "admin-logout";
+
+export function AdminHeader({
+  items,
+  email,
+  dev,
+  canLogout,
+}: {
+  items: AdminNavItem[];
+  email: string;
+  dev: boolean;
+  /** False for the local development bypass (there is no session to end). */
+  canLogout: boolean;
+}) {
   const { pathname } = useLocation();
   const current = items.find((i) => isActive(i, pathname)) ?? items[0];
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/80 backdrop-blur-md">
+      {canLogout ? <Form id={LOGOUT_FORM} method="post" action="/admin/logout" className="hidden" /> : null}
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:gap-6">
         <Link
           to="/admin"
@@ -78,6 +99,17 @@ export function AdminHeader({ items, email, dev }: { items: AdminNavItem[]; emai
             <UserCircleIcon className="size-4 shrink-0 text-slate-400" aria-hidden="true" />
             <span className="max-w-44 truncate xl:max-w-64">{email}</span>
           </span>
+          {canLogout ? (
+            <button
+              type="submit"
+              form={LOGOUT_FORM}
+              title="Keluar"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/80 bg-white/80 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+            >
+              <ArrowRightStartOnRectangleIcon className="size-4" aria-hidden="true" />
+              <span className="sr-only">Keluar</span>
+            </button>
+          ) : null}
         </div>
 
         {/* below lg: dropdown menu */}
@@ -129,6 +161,21 @@ export function AdminHeader({ items, email, dev }: { items: AdminNavItem[]; emai
                 </MenuItem>
               );
             })}
+            {canLogout ? (
+              <>
+                <MenuSeparator className="mx-1 my-1 h-px bg-slate-100" />
+                <MenuItem>
+                  <button
+                    type="submit"
+                    form={LOGOUT_FORM}
+                    className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-red-50 data-focus:text-red-700"
+                  >
+                    <ArrowRightStartOnRectangleIcon className="size-5 text-slate-400" aria-hidden="true" />
+                    Keluar
+                  </button>
+                </MenuItem>
+              </>
+            ) : null}
           </MenuItems>
         </Menu>
       </div>

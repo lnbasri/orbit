@@ -1,4 +1,4 @@
-import { Outlet, data, isRouteErrorResponse } from "react-router";
+import { Outlet, data, isRouteErrorResponse, redirect } from "react-router";
 import {
   ClipboardDocumentListIcon,
   Cog6ToothIcon,
@@ -9,30 +9,44 @@ import {
 } from "@heroicons/react/24/outline";
 
 import type { Route } from "./+types/layout";
-import { adminEmailContext } from "~/lib/admin-context";
+import { adminAuthMethodContext, adminEmailContext } from "~/lib/admin-context";
 import { ensureBootstrap, isAdmin, touchLogin } from "~/lib/admins.server";
-import { identifyUser } from "~/lib/auth.server";
+import { identifyUser, isSameOrigin, loginPath } from "~/lib/auth.server";
 import { featureEnabled, isDev } from "~/lib/config.server";
 import { getAppEnv } from "~/lib/env.server";
 import { AdminHeader, type AdminNavItem } from "~/components/AdminHeader";
 import { Backdrop } from "~/components/ui";
 
-// Every /admin route (pages, actions, CSV export) passes through this check:
-// 1) identity from Cloudflare Access, 2) membership of the `admins` table (fails closed).
+// Every /admin route (pages, actions, CSV export) passes through this check (fails closed):
+// 1) identity = the app's own session cookie (PIN or Google login), 2) membership of the `admins` table.
 export const middleware: Route.MiddlewareFunction[] = [
-  async ({ request, context }, next) => {
+  async ({ request, url, context }, next) => {
     const env = getAppEnv();
     if (!featureEnabled(env, "admin")) throw data("Tidak ditemukan.", { status: 404 });
-    const result = await identifyUser(request, env);
-    if (!result.ok) throw data(result.reason, { status: result.status });
-
+    if (request.method !== "GET" && request.method !== "HEAD" && !isSameOrigin(request)) {
+      throw data("Permintaan ditolak.", { status: 403 });
+    }
     await ensureBootstrap(env.DB, env.ADMIN_EMAILS);
+    const result = await identifyUser(request, env);
+    if (!result.ok) throw redirect(loginPath(url.pathname + url.search));
+
+    // The session lookup already joins the admins table; this also covers the development bypass.
     if (!(await isAdmin(env.DB, result.email))) {
       throw data(`Akses ditolak. ${result.email} bukan admin panitia.`, { status: 403 });
     }
     await touchLogin(env.DB, result.email);
     context.set(adminEmailContext, result.email);
-    return next();
+    context.set(adminAuthMethodContext, result.method);
+    const response = await next();
+    // Admin pages hold personal data: never cache them in shared or browser caches.
+    if (response instanceof Response) {
+      try {
+        response.headers.set("Cache-Control", "private, no-store");
+      } catch {
+        // immutable headers (e.g. Response.redirect): nothing to cache anyway
+      }
+    }
+    return response;
   },
 ];
 
@@ -44,6 +58,7 @@ export function loader({ context }: Route.LoaderArgs) {
   const env = getAppEnv();
   return {
     email: context.get(adminEmailContext),
+    canLogout: context.get(adminAuthMethodContext) !== "dev",
     dev: isDev(env),
     outbox: env.EMAIL_MODE !== "resend",
   };
@@ -62,7 +77,7 @@ export default function AdminLayout({ loaderData }: Route.ComponentProps) {
     : NAV;
   return (
     <Backdrop>
-      <AdminHeader items={items} email={loaderData.email} dev={loaderData.dev} />
+      <AdminHeader items={items} email={loaderData.email} dev={loaderData.dev} canLogout={loaderData.canLogout} />
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10">
         <Outlet />
       </main>

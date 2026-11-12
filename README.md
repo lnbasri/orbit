@@ -1,6 +1,6 @@
 # PPME Den Haag – Event registration (Cloudflare)
 
-React Router 8 (SSR) on Cloudflare Workers, with D1 (SQLite), Turnstile, Resend and Cloudflare Access.
+React Router 8 (SSR) on Cloudflare Workers, with D1 (SQLite), Turnstile, Resend and its own admin login (email PIN, optional Google).
 Replaces the Google Apps Script version in `../original-apps-scripts/`. Requirements live in the
 "Functional Requirements & Cloudflare Migration" doc (FR ids are referenced in code comments).
 
@@ -56,15 +56,19 @@ Local tips:
 - **Email is the key (B5):** a partial unique index allows one active (accepted/pending) registration per
   email per event. Expired or rejected attempts do not block re-registering.
 - **QR privacy:** the QR contains only a random 26-character ticket code (128-bit, Crockford base32).
-  It is not derived from names or database ids. Only admins (and, next, scanners behind Access) can resolve it.
+  It is not derived from names or database ids. Only logged-in admins (and, next, scanners) can resolve it.
 - **QR images:** generated in the Worker (`app/lib/qr.ts` + `app/lib/png.ts`, ~1 KB PNG each), attached inline
   (`cid:`) to the Resend email. No third-party QR service.
 - **Turnstile:** widget on the form; the action verifies the token server-side before any validation or write.
-- **Admin auth = identity + authorization.** Cloudflare Access proves *who* you are (the app verifies its signed JWT).
-  The `admins` table decides *whether you may enter*; it is managed in **/admin/admins** (add/remove, effective
-  immediately, audited). Rules: you cannot remove yourself and the last admin cannot be removed (both enforced in SQL).
-  `ADMIN_EMAILS` is only a one-time seed used while the table is empty. Fails closed: no Access config, no valid JWT,
-  or an email not in the table all give 401/403.
+- **Admin auth = identity + authorization, owned by the app.** `/admin/login` sends a 6-digit code by email (Resend):
+  valid 10 minutes, 5 attempts, one use, at most 1 per minute and 5 per hour per email; unknown emails get the same
+  answer and no email. Optional **"Masuk dengan Google"** (OpenID Connect with PKCE) appears once `GOOGLE_CLIENT_ID`
+  (var) and `GOOGLE_CLIENT_SECRET` (secret) are set; register `<admin origin>/admin/auth/google/callback` as redirect URI.
+  A successful login sets an HttpOnly `__Host-ppme_admin` cookie for **24 hours** (only its hash is stored in
+  `admin_sessions`); "Keluar" in the header ends it. The `admins` table decides *whether you may enter* and is checked on
+  every request; it is managed in **/admin/admins** (add/remove, effective immediately, audited; removing an admin ends
+  their sessions). You cannot remove yourself and the last admin cannot be removed (both enforced in SQL).
+  `ADMIN_EMAILS` is only a one-time seed used while the table is empty. Fails closed: no valid session = redirect to login.
 
 ## Project layout
 
@@ -83,8 +87,8 @@ workers/app.ts                  Worker entry: fetch (React Router) + scheduled (
 ```
 
 ## Environments
-`wrangler.jsonc` defines **`test`** (Worker `ppme-registration`: public form on workers.dev, `/admin` off), **`test-admin`** (Worker `ppme-registration-admin`: `/admin` only, fully behind
-Cloudflare Access on its own workers.dev address, same database) and, later, **`production`** (the proper Worker for `event.ppmedenhaag.nl`, its own new database). Switches `ENABLE_PUBLIC` /
+`wrangler.jsonc` defines **`test`** (Worker `ppme-registration`: public form on workers.dev, `/admin` off), **`test-admin`** (Worker `ppme-registration-admin`: `/admin` only, with the app's
+own login, on its own workers.dev address, same database) and, later, **`production`** (the proper Worker for `event.ppmedenhaag.nl`, its own new database). Switches `ENABLE_PUBLIC` /
 `ENABLE_ADMIN` (string `"false"` = off) decide what a Worker serves. Secrets are per Worker (`--env <env>`). Deploy with `npm run deploy:test`, `npm run deploy:test-admin` or
 `node scripts/deploy.mjs <env>`. The full picture and the steps for both tracks are in `docs/deploy-runbook.md`; the steps below were written for the first (test) deploy.
 
@@ -122,14 +126,11 @@ In Claude Code you can run interactive commands by prefixing them with `!`, e.g.
    ```
    Then add a custom domain: dashboard → Workers & Pages → ppme-registration → Settings → Domains & Routes
    (e.g. `daftar.ppmedenhaag.nl`, still to be decided).
-6. **Cloudflare Access for /admin:** Zero Trust → Access → Applications → Add → Self-hosted.
-   Domain = your hostname, path = `admin` (add a second path `admin/*`). Login method: One-time PIN only.
-   **Policy: Allow → Include → Everyone.** This looks open but is intentional: Access only verifies that the person owns
-   the email address (PIN sent to their inbox); the app then checks the `admins` table. This is what lets admins be added
-   and removed in /admin/admins without touching Cloudflare. (Stricter alternative: Include → Emails = the committee, but
-   then every new admin must also be added in the Access policy by hand.) Copy the application's **AUD tag** and your team domain
-   (`<team>.cloudflareaccess.com`) into the environment's `vars.ACCESS_AUD` / `ACCESS_TEAM_DOMAIN`, then deploy again.
-   The `*.workers.dev` URL bypasses Access, but the app still rejects it (no Access JWT = 401).
+6. **Admin login:** nothing to configure in Cloudflare (no Access). The admin Worker needs `RESEND_API_KEY` (login
+   codes) and a remote migration (`wrangler d1 migrations apply DB --remote --env <env>`). Optional Google sign-in:
+   create an OAuth client (Web application) in Google Cloud, add the redirect URI
+   `<admin origin>/admin/auth/google/callback`, put the client id in `vars.GOOGLE_CLIENT_ID` and run
+   `npx wrangler secret put GOOGLE_CLIENT_SECRET --env <admin env>`, then deploy again.
 7. Smoke test in production: one member and one non-member registration, check both emails, approve the
    payment in `/admin`, then delete the test rows and reset the counter:
    ```bash
@@ -138,7 +139,7 @@ In Claude Code you can run interactive commands by prefixing them with `!`, e.g.
 
 ## TODO (in order)
 
-1. **Scanner** `/scan` + `POST /api/checkin`: Access policy for scanner volunteers (separate from admins),
+1. **Scanner** `/scan` + `POST /api/checkin`: scanner role in the app (separate from admins, same login),
    bundled html5-qrcode (pinned), atomic `UPDATE participants SET checked_in_at … WHERE qr_token = ? AND
    checked_in_at IS NULL`, show only name + category (FR-PRIV-6), check-in by search as fallback.
 2. Manual registration form in admin (FR-ADM-15, outside quota).

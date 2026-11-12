@@ -5,11 +5,13 @@
  * ENVIRONMENTS (vars and d1_databases are NOT inherited, so each block repeats them):
  *   (top level)  local development: D1 is emulated by Miniflare, secrets come from `.dev.vars`
  *   test         TEMPORARY public test Worker  `ppme-registration`        on workers.dev, form only (/admin is 404)
- *   test-admin   TEMPORARY admin for the test  `ppme-registration-admin`  on workers.dev, /admin only, fully behind Cloudflare Access
+ *   test-admin   TEMPORARY admin for the test  `ppme-registration-admin`  on workers.dev, /admin only, app login (email PIN / Google)
  *   production        (planned, not created) public form on event.ppmedenhaag.nl, ENABLE_ADMIN=false, cron, its own NEW clean D1
  *   production-admin  (planned, not created) admin + later the scanner on event-admin.ppmedenhaag.nl, ENABLE_PUBLIC=false, no cron,
- *                     one Access application on the whole host, same new D1. See docs/deploy-runbook.md (Track 2) and docs/dns-migration-todo.md.
- * Secrets are per Worker: wrangler secret put <NAME> --env <env>   (test: TURNSTILE_SECRET + RESEND_API_KEY; test-admin: RESEND_API_KEY)
+ *                     app login, same new D1. See docs/deploy-runbook.md (Track 2) and docs/dns-migration-todo.md.
+ * Admin login is the app's own (no Cloudflare Access): a 6-digit PIN by email via Resend, optionally Google sign-in
+ * (set GOOGLE_CLIENT_ID below + `wrangler secret put GOOGLE_CLIENT_SECRET --env <admin env>`); sessions last 24 h.
+ * Secrets are per Worker: wrangler secret put <NAME> --env <env>   (test: TURNSTILE_SECRET + RESEND_API_KEY; test-admin: RESEND_API_KEY [+ GOOGLE_CLIENT_SECRET])
  * Feature switches (string "false" turns one off, anything else = on): ENABLE_PUBLIC (form) and ENABLE_ADMIN (/admin).
  */
 {
@@ -47,9 +49,8 @@
 		"BANK_IBAN": "NL00 TEST 0000 0000 00",
 		// One-time seed: only used to fill the `admins` table while it is empty. After that admins are managed in /admin/admins.
 		"ADMIN_EMAILS": "",
-		// Cloudflare Access (deployed environments). Leave empty in development.
-		"ACCESS_TEAM_DOMAIN": "",
-		"ACCESS_AUD": ""
+		// Optional Google sign-in on /admin/login (needs the GOOGLE_CLIENT_SECRET secret too; empty = PIN only).
+		"GOOGLE_CLIENT_ID": ""
 	},
 
 	"env": {
@@ -71,7 +72,7 @@
 			"vars": {
 				"APP_ENV": "production",
 				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
-				// Cloudflare Access cannot protect only /admin on workers.dev, so the admin lives on the `test-admin` Worker.
+				// The admin lives on its own Worker (`test-admin`): smaller attack surface for the public host.
 				"ENABLE_ADMIN": "false",
 				"TURNSTILE_SITE_KEY": "0x4AAAAAAF9STdC9uclCsE_i",
 				// Public bank account of the association (a donation account), so plain config, not secrets.
@@ -81,14 +82,13 @@
 				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
 				"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
 				"ADMIN_EMAILS": "",
-				"ACCESS_TEAM_DOMAIN": "",
-				"ACCESS_AUD": ""
+				"GOOGLE_CLIENT_ID": ""
 			}
 		},
 
-		// ---- TEST-ADMIN: /admin only, on its own workers.dev address, protected as a whole by Cloudflare Access
-		// (Worker > Settings > Domains & Routes > workers.dev > "Enable Cloudflare Access"). Same database as `test`.
-		// Until ACCESS_TEAM_DOMAIN and ACCESS_AUD are filled in, /admin fails closed (403).
+		// ---- TEST-ADMIN: /admin only, on its own workers.dev address. Same database as `test`.
+		// Every /admin page requires the app's own login (email PIN, or Google once GOOGLE_CLIENT_ID + secret are set).
+		// Sends login-code emails, so it needs the RESEND_API_KEY secret.
 		"test-admin": {
 			"name": "ppme-registration-admin",
 			"workers_dev": true,
@@ -113,8 +113,9 @@
 				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
 				"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
 				"ADMIN_EMAILS": "",
-				"ACCESS_TEAM_DOMAIN": "dry-field-4723.cloudflareaccess.com",
-				"ACCESS_AUD": "24ee5629aa0191c16db49aeff70a4de16770147c7aafeecfec96f9f1aeb770a4"
+				// Google sign-in: fill in the OAuth client id and set the GOOGLE_CLIENT_SECRET secret on this Worker.
+				// Authorised redirect URI: https://ppme-registration-admin.ppme-registration.workers.dev/admin/auth/google/callback
+				"GOOGLE_CLIENT_ID": ""
 			}
 		}
 	}

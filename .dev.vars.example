@@ -9,5 +9,10 @@ TURNSTILE_SECRET=1x0000000000000000000000000000000AA
 RESEND_API_KEY=
 
 
-# Local only: pretend to be this Access user on /admin (ignored unless APP_ENV=development)
+# Local only: skip the /admin login and act as this admin (ignored unless APP_ENV=development).
+# Leave it empty to test the real PIN login; the code is printed in the `npm run dev` terminal.
 DEV_ADMIN_EMAIL=admin@example.com
+
+# Optional Google sign-in (also set GOOGLE_CLIENT_ID in wrangler.jsonc vars). Local redirect URI:
+# http://localhost:5173/admin/auth/google/callback
+GOOGLE_CLIENT_SECRET=

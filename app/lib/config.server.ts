@@ -15,8 +15,10 @@ export interface AppEnv {
   BANK_IBAN?: string;
   /** Seed list for the admins table (first run only). */
   ADMIN_EMAILS?: string;
-  ACCESS_TEAM_DOMAIN?: string;
-  ACCESS_AUD?: string;
+  /** Optional Google sign-in on /admin/login: both must be set (client id = var, secret = `wrangler secret put`). */
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  /** Development only: skip the admin login and act as this admin. */
   DEV_ADMIN_EMAIL?: string;
   /** "false" turns the public registration form off on this Worker (admin-only Worker). */
   ENABLE_PUBLIC?: string;

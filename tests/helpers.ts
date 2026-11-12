@@ -29,6 +29,8 @@ export async function resetDb(db: D1Database, quotas: { member?: number; nonMemb
     db.prepare("DELETE FROM email_log"),
     db.prepare("DELETE FROM audit_log"),
     db.prepare("DELETE FROM dev_outbox"),
+    db.prepare("DELETE FROM admin_sessions"),
+    db.prepare("DELETE FROM admin_login_codes"),
     db.prepare("DELETE FROM admins"),
     db.prepare("DELETE FROM participants"),
     db.prepare("DELETE FROM registrations"),

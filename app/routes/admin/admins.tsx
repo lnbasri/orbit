@@ -83,7 +83,7 @@ export default function Admins({ loaderData }: Route.ComponentProps) {
           <Notice result={fetcher.data} className="mt-4" />
           <p className="mt-4 flex items-start gap-2 text-xs text-slate-500">
             <InformationCircleIcon className="size-4 shrink-0" aria-hidden="true" />
-            Orang yang ditambahkan login lewat Cloudflare Access dengan kode sekali pakai yang dikirim ke emailnya.
+            Orang yang ditambahkan masuk dengan kode sekali pakai yang dikirim ke emailnya (atau dengan akun Google bila diaktifkan). Menghapus admin langsung mengakhiri sesinya.
           </p>
         </Panel>
 

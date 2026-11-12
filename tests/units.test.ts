@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { identifyUser } from "../app/lib/auth.server";
+import {
+  clearSessionCookie,
+  isSameOrigin,
+  loginPath,
+  readCookie,
+  safeNextPath,
+  sessionCookie,
+} from "../app/lib/auth.server";
+import { countryName, describeDevice } from "../app/lib/email/login-code";
+import { googleConfig } from "../app/lib/google-oauth.server";
+import { generateCode, normalizeCode } from "../app/lib/login-codes.server";
 import { bankConfigured, featureEnabled } from "../app/lib/config.server";
 import { toCsv } from "../app/lib/csv";
 import { verifyTurnstile } from "../app/lib/turnstile.server";
@@ -93,19 +103,73 @@ describe("Turnstile verification", () => {
   });
 });
 
-describe("admin identity (Access JWT / dev stub)", () => {
-  const req = new Request("https://example.com/admin");
-
-  it("uses the dev identity only in development", async () => {
-    expect(await identifyUser(req, { APP_ENV: "development", DEV_ADMIN_EMAIL: "A@x.nl" })).toEqual({ ok: true, email: "a@x.nl" });
-    expect((await identifyUser(req, { APP_ENV: "production", DEV_ADMIN_EMAIL: "a@x.nl" })).ok).toBe(false);
+describe("admin login helpers", () => {
+  it("only allows relative /admin destinations after login", () => {
+    expect(safeNextPath("/admin/registrations?status=accepted")).toBe("/admin/registrations?status=accepted");
+    expect(safeNextPath("/admin")).toBe("/admin");
+    for (const bad of [
+      null,
+      "",
+      "https://evil.example/admin",
+      "//evil.example/admin",
+      "/\\evil.example",
+      "/e/kajian",
+      "/administrator",
+      "/admin/login",
+      "/admin/logout",
+      "/admin/auth/google/callback",
+      "javascript:alert(1)",
+    ]) {
+      expect(safeNextPath(bad), String(bad)).toBe("/admin");
+    }
+    expect(loginPath("/admin")).toBe("/admin/login");
+    expect(loginPath("/admin/export")).toBe("/admin/login?next=%2Fadmin%2Fexport");
   });
 
-  it("fails closed in production when Access is not configured or no token is sent", async () => {
-    expect(await identifyUser(req, { APP_ENV: "production" })).toMatchObject({ ok: false, status: 403 });
-    expect(
-      await identifyUser(req, { APP_ENV: "production", ACCESS_TEAM_DOMAIN: "t.cloudflareaccess.com", ACCESS_AUD: "aud" }),
-    ).toMatchObject({ ok: false, status: 401 });
+  it("normalises codes and generates uniform 6-digit codes", () => {
+    expect(normalizeCode("123 456")).toBe("123456");
+    expect(normalizeCode("123-456")).toBe("123456");
+    expect(normalizeCode("12345")).toBeNull();
+    expect(normalizeCode("12345a")).toBeNull();
+    for (let i = 0; i < 200; i++) expect(generateCode()).toMatch(/^\d{6}$/);
+  });
+
+  it("reads cookies and rejects cross-site posts", () => {
+    const req = new Request("https://admin.example/admin", {
+      method: "POST",
+      headers: { Cookie: "a=1; __Host-ppme_admin=tok%2Ben; b=2", Origin: "https://evil.example" },
+    });
+    expect(readCookie(req, "__Host-ppme_admin")).toBe("tok+en");
+    expect(readCookie(req, "missing")).toBeNull();
+    expect(isSameOrigin(req)).toBe(false);
+    expect(isSameOrigin(new Request("https://admin.example/admin", { headers: { Origin: "https://admin.example" } }))).toBe(true);
+    expect(isSameOrigin(new Request("https://admin.example/admin"))).toBe(true);
+  });
+
+  it("issues host-only secure cookies on https and plain ones on http", () => {
+    const https = sessionCookie(new Request("https://admin.example/admin"), "abc");
+    expect(https).toMatch(/^__Host-ppme_admin=abc; Path=\/; Max-Age=86400; HttpOnly; SameSite=Lax; Secure$/);
+    const http = sessionCookie(new Request("http://localhost:5173/admin"), "abc");
+    expect(http).toBe("ppme_admin=abc; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax");
+    expect(clearSessionCookie(new Request("https://admin.example/"))).toContain("Max-Age=0");
+  });
+
+  it("enables Google sign-in only with both client id and secret", () => {
+    expect(googleConfig({})).toBeNull();
+    expect(googleConfig({ GOOGLE_CLIENT_ID: "id" })).toBeNull();
+    expect(googleConfig({ GOOGLE_CLIENT_ID: " id ", GOOGLE_CLIENT_SECRET: "s" })).toEqual({ clientId: "id", clientSecret: "s" });
+  });
+
+  it("describes the requesting device and country for the email", () => {
+    const chromeWin =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+    expect(describeDevice(chromeWin)).toBe("Chrome di Windows");
+    expect(describeDevice("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit Version/18.0 Safari/604.1")).toBe(
+      "Safari di iOS",
+    );
+    expect(describeDevice(null)).toBeNull();
+    expect(countryName("NL")).toBe("Belanda");
+    expect(countryName("XX")).toBeNull();
   });
 });
 

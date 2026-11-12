@@ -5,6 +5,11 @@ export default [
   route("e/:slug", "routes/register.tsx"),
 
   ...prefix("admin", [
+    // Login/logout and the Google callback sit outside the protected layout.
+    route("login", "routes/admin/login.tsx"),
+    route("logout", "routes/admin/logout.tsx"),
+    route("auth/google", "routes/admin/auth-google.tsx"),
+    route("auth/google/callback", "routes/admin/auth-google-callback.tsx"),
     layout("routes/admin/layout.tsx", [
       index("routes/admin/dashboard.tsx"),
       route("registrations", "routes/admin/registrations.tsx"),
