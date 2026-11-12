@@ -4,6 +4,7 @@ import {
   ArrowPathIcon,
   ArrowRightIcon,
   EnvelopeIcon,
+  ExclamationTriangleIcon,
   LockClosedIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
@@ -13,6 +14,7 @@ import { Form, Link, data, redirect, useActionData, useNavigation } from "react-
 import type { Route } from "./+types/login";
 import { Notice } from "~/components/admin";
 import { inputClass, TextField } from "~/components/forms";
+import { Turnstile } from "~/components/Turnstile";
 import { Backdrop, buttonClass, Callout, Eyebrow, Logo, Spinner } from "~/components/ui";
 import { ensureBootstrap, normalizeEmail } from "~/lib/admins.server";
 import { createSession, identifyUser, isSameOrigin, requestMeta, safeNextPath, sessionCookie } from "~/lib/auth.server";
@@ -20,6 +22,7 @@ import { emailConfig, featureEnabled, isDev } from "~/lib/config.server";
 import { getAppEnv } from "~/lib/env.server";
 import { googleConfig } from "~/lib/google-oauth.server";
 import { CODE_COOLDOWN_MS, CODE_TTL_MS, isValidEmail, requestLoginCode, verifyLoginCode } from "~/lib/login-codes.server";
+import { verifyTurnstile } from "~/lib/turnstile.server";
 
 export function meta() {
   return [{ title: "Masuk – Dashboard Panitia PPME Den Haag" }, { name: "robots", content: "noindex" }];
@@ -48,6 +51,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   return {
     next,
     google: googleConfig(env) !== null,
+    turnstileSiteKey: env.TURNSTILE_SITE_KEY?.trim() ?? "",
     error: error ? (GOOGLE_ERRORS[error] ?? null) : null,
     loggedOut: url.searchParams.has("out"),
     devLog: isDev(env) && env.EMAIL_MODE !== "resend",
@@ -73,11 +77,30 @@ export async function action({ request, url }: Route.ActionArgs) {
   }
 
   if (intent === "request") {
+    // Every code request needs a Turnstile pass (email form and "Kirim ulang"): bots cannot make us send mail,
+    // which would burn the Resend quota that registration emails depend on. Fails closed without a secret.
+    const resend = form.get("resend") === "1";
+    const turnstile = await verifyTurnstile(
+      env.TURNSTILE_SECRET,
+      form.get("cf-turnstile-response")?.toString() ?? null,
+      request.headers.get("CF-Connecting-IP"),
+    );
+    if (!turnstile.success) {
+      console.error("login turnstile failed:", turnstile.errorCodes.join(",") || "unknown");
+      const error = "Verifikasi keamanan gagal atau kedaluwarsa. Silakan selesaikan verifikasi lalu coba lagi.";
+      return data<ActionData>(
+        resend
+          ? { step: "code", email, sentAt: Number(form.get("sentAt")) || Date.now(), error }
+          : { step: "email", email, error },
+        { status: 400 },
+      );
+    }
+
     await ensureBootstrap(env.DB, env.ADMIN_EMAILS);
     // Same answer whatever happened (sent, not an admin, rate-limited, provider error), so this form cannot be used
     // to find out who is an admin. Failures are logged and audited.
     await requestLoginCode(env.DB, emailConfig(env), email, { ...requestMeta(request), appOrigin: url.origin });
-    return data<ActionData>({ step: "code", email, sentAt: Date.now(), resent: form.get("resend") === "1" });
+    return data<ActionData>({ step: "code", email, sentAt: Date.now(), resent: resend });
   }
 
   if (intent === "verify") {
@@ -130,6 +153,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
                 next={loaderData.next}
                 validMinutes={loaderData.validMinutes}
                 cooldown={loaderData.cooldownSeconds}
+                siteKey={loaderData.turnstileSiteKey}
               />
             ) : (
               <EmailStep
@@ -138,6 +162,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
                 defaultEmail={actionData?.email ?? ""}
                 error={actionData?.step === "email" ? actionData.error : loaderData.error}
                 loggedOut={loaderData.loggedOut && !actionData}
+                siteKey={loaderData.turnstileSiteKey}
               />
             )}
             {loaderData.devLog ? (
@@ -168,14 +193,17 @@ function EmailStep({
   defaultEmail,
   error,
   loggedOut,
+  siteKey,
 }: {
   next: string;
   google: boolean;
   defaultEmail: string;
   error: string | null;
   loggedOut: boolean;
+  siteKey: string;
 }) {
   const busy = useBusy("request");
+  const [token, setToken] = useState<string | null>(null);
   return (
     <div className="space-y-6">
       {loggedOut ? <Notice result={{ ok: true, message: "Anda telah keluar dari Dashboard Panitia." }} /> : null}
@@ -218,7 +246,14 @@ function EmailStep({
           required
           autoFocus
         />
-        <button type="submit" disabled={busy} className={buttonClass("primary", "lg", "w-full")}>
+        {siteKey ? (
+          <Turnstile siteKey={siteKey} resetKey={error ?? undefined} onToken={setToken} />
+        ) : (
+          <Callout tone="danger" icon={ExclamationTriangleIcon} className="text-[13px]">
+            Verifikasi keamanan (Turnstile) belum dikonfigurasi di server ini, sehingga kode masuk tidak dapat dikirim.
+          </Callout>
+        )}
+        <button type="submit" disabled={busy || !token} className={buttonClass("primary", "lg", "w-full")}>
           {busy ? <Spinner /> : null}
           {busy ? "Mengirim kode…" : "Kirim kode masuk"}
           {busy ? null : <ArrowRightIcon className="size-4" aria-hidden="true" />}
@@ -236,6 +271,7 @@ function CodeStep({
   next,
   validMinutes,
   cooldown,
+  siteKey,
 }: {
   email: string;
   sentAt: number;
@@ -244,7 +280,9 @@ function CodeStep({
   next: string;
   validMinutes: number;
   cooldown: number;
+  siteKey: string;
 }) {
+  const [token, setToken] = useState<string | null>(null);
   const verifying = useBusy("verify");
   const resending = useBusy("request");
   const formRef = useRef<HTMLFormElement>(null);
@@ -311,12 +349,17 @@ function CodeStep({
           <ArrowLeftIcon className="size-4" aria-hidden="true" />
           Ganti email
         </Link>
-        <Form method="post">
+        <Form method="post" className="flex flex-col items-end gap-2">
           <input type="hidden" name="intent" value="request" />
           <input type="hidden" name="resend" value="1" />
           <input type="hidden" name="email" value={email} />
           <input type="hidden" name="next" value={next} />
-          <button type="submit" disabled={wait > 0 || resending} className={buttonClass("secondary", "sm")}>
+          <input type="hidden" name="sentAt" value={sentAt} />
+          {/* Invisible unless Cloudflare wants a click; a resend is a code request and needs a pass too. */}
+          {siteKey ? (
+            <Turnstile siteKey={siteKey} appearance="interaction-only" resetKey={error ?? undefined} onToken={setToken} />
+          ) : null}
+          <button type="submit" disabled={wait > 0 || resending || !token} className={buttonClass("secondary", "sm")}>
             {resending ? <Spinner /> : <ArrowPathIcon className="size-4" aria-hidden="true" />}
             {wait > 0 ? `Kirim ulang (${wait} dtk)` : "Kirim ulang kode"}
           </button>

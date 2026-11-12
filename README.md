@@ -62,7 +62,7 @@ Local tips:
 - **Turnstile:** widget on the form; the action verifies the token server-side before any validation or write.
 - **Admin auth = identity + authorization, owned by the app.** `/admin/login` sends a 6-digit code by email (Resend):
   valid 10 minutes, 5 attempts, one use, at most 1 per minute and 5 per hour per email; unknown emails get the same
-  answer and no email. Optional **"Masuk dengan Google"** (OpenID Connect with PKCE) appears once `GOOGLE_CLIENT_ID`
+  answer and no email. Every code request (also "Kirim ulang") needs a Turnstile pass, so bots cannot burn the Resend quota. Optional **"Masuk dengan Google"** (OpenID Connect with PKCE) appears once `GOOGLE_CLIENT_ID`
   (var) and `GOOGLE_CLIENT_SECRET` (secret) are set; register `<admin origin>/admin/auth/google/callback` as redirect URI.
   A successful login sets an HttpOnly `__Host-ppme_admin` cookie for **24 hours** (only its hash is stored in
   `admin_sessions`); "Keluar" in the header ends it. The `admins` table decides *whether you may enter* and is checked on

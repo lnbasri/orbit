@@ -11,7 +11,7 @@
  *                     app login, same new D1. See docs/deploy-runbook.md (Track 2) and docs/dns-migration-todo.md.
  * Admin login is the app's own (no Cloudflare Access): a 6-digit PIN by email via Resend, optionally Google sign-in
  * (set GOOGLE_CLIENT_ID below + `wrangler secret put GOOGLE_CLIENT_SECRET --env <admin env>`); sessions last 24 h.
- * Secrets are per Worker: wrangler secret put <NAME> --env <env>   (test: TURNSTILE_SECRET + RESEND_API_KEY; test-admin: RESEND_API_KEY [+ GOOGLE_CLIENT_SECRET])
+ * Secrets are per Worker: wrangler secret put <NAME> --env <env>   (test: TURNSTILE_SECRET + RESEND_API_KEY; test-admin: TURNSTILE_SECRET + RESEND_API_KEY [+ GOOGLE_CLIENT_SECRET])
  * Feature switches (string "false" turns one off, anything else = on): ENABLE_PUBLIC (form) and ENABLE_ADMIN (/admin).
  */
 {
@@ -107,6 +107,9 @@
 				"APP_ENV": "production",
 				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
 				"ENABLE_PUBLIC": "false",
+				// Turnstile on the login form (code requests). Same widget as `test`: its hostname list must include this
+				// Worker's workers.dev address, and this Worker needs its own TURNSTILE_SECRET secret.
+				"TURNSTILE_SITE_KEY": "0x4AAAAAAF9STdC9uclCsE_i",
 				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
 				"BANK_IBAN": "NL26 INGB 0002 1661 44",
 				"EMAIL_MODE": "resend",

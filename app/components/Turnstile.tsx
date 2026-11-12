@@ -38,10 +38,13 @@ export function Turnstile({
   siteKey,
   resetKey,
   onToken,
+  appearance = "always",
 }: {
   siteKey: string;
   resetKey?: unknown;
   onToken?: (token: string | null) => void;
+  /** "interaction-only" keeps the widget invisible unless Cloudflare needs the visitor to click. */
+  appearance?: "always" | "interaction-only";
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const widgetId = useRef<string | null>(null);
@@ -56,6 +59,7 @@ export function Turnstile({
         widgetId.current = window.turnstile.render(ref.current, {
           sitekey: siteKey,
           language: "id",
+          appearance,
           callback: (token: string) => onTokenRef.current?.(token),
           "expired-callback": () => onTokenRef.current?.(null),
           "error-callback": () => onTokenRef.current?.(null),
@@ -67,7 +71,7 @@ export function Turnstile({
       if (widgetId.current && window.turnstile) window.turnstile.remove(widgetId.current);
       widgetId.current = null;
     };
-  }, [siteKey]);
+  }, [siteKey, appearance]);
 
   useEffect(() => {
     if (resetKey === undefined || !widgetId.current || !window.turnstile) return;
@@ -75,5 +79,5 @@ export function Turnstile({
     onTokenRef.current?.(null);
   }, [resetKey]);
 
-  return <div ref={ref} className="min-h-[65px]" />;
+  return <div ref={ref} className={appearance === "always" ? "min-h-[65px]" : ""} />;
 }
