@@ -49,7 +49,7 @@
 		// Bank details shown to non-members. Public information (donation account), so plain config, not secrets.
 		"BANK_ACCOUNT_NAME": "PPME Den Haag (contoh)",
 		"BANK_IBAN": "NL00 TEST 0000 0000 00",
-		// One-time seed: only used to fill the `admins` table while it is empty. After that admins are managed in /admin/admins.
+		// One-time seed (comma-separated emails), kept empty in git: set it as a secret (`wrangler secret put ADMIN_EMAILS --env <env>`) or in .dev.vars. Only used to fill the `admins` table while it is empty. After that admins are managed in /admin/admins.
 		"ADMIN_EMAILS": "",
 		// Optional Google sign-in on /admin/login (needs the GOOGLE_CLIENT_SECRET secret too; empty = PIN only).
 		"GOOGLE_CLIENT_ID": ""

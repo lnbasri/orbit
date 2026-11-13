@@ -13,6 +13,9 @@ RESEND_API_KEY=
 # Leave it empty to test the real PIN login; the code is printed in the `npm run dev` terminal.
 DEV_ADMIN_EMAIL=admin@example.com
 
+# Seeds the admins table on first run (comma-separated). Use the same address as DEV_ADMIN_EMAIL or your own.
+ADMIN_EMAILS=admin@example.com
+
 # Optional Google sign-in (also set GOOGLE_CLIENT_ID in wrangler.jsonc vars). Local redirect URI:
 # http://localhost:5173/admin/auth/google/callback
 GOOGLE_CLIENT_SECRET=
