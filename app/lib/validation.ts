@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { AGE_GROUPS } from "./format";
+
+export const REGISTRANT_MUST_BE_ADULT = "Pendaftar (peserta 1) harus berusia dewasa (18 tahun ke atas).";
 
 /** Keep digits and a leading +. 00… becomes +…; Dutch 06… becomes +316…. */
 export function normalizeWhatsapp(raw: string): string {
@@ -12,7 +15,7 @@ const participantSchema = () =>
   z.object({
     name: z.string().trim().min(1, "Nama peserta wajib diisi.").max(120, "Nama terlalu panjang."),
     gender: z.enum(["laki-laki", "perempuan"], { error: "Jenis kelamin wajib dipilih." }),
-    ageGroup: z.enum(["anak", "remaja", "dewasa"], { error: "Kelompok usia wajib dipilih." }),
+    ageGroup: z.enum(AGE_GROUPS, { error: "Kelompok usia wajib dipilih." }),
   });
 
 export function registrationSchema(maxFamily: number) {
@@ -32,6 +35,9 @@ export function registrationSchema(maxFamily: number) {
     mediaConsent: z.literal(true, { error: "Pemberitahuan dokumentasi dan siaran langsung wajib dicentang." }),
     marketingOptIn: z.boolean(),
     idempotencyKey: z.string().uuid().optional(),
+  }).refine((v) => v.participants[0]?.ageGroup === "dewasa", {
+    path: ["participants", 0, "ageGroup"],
+    error: REGISTRANT_MUST_BE_ADULT,
   });
 }
 
@@ -104,6 +110,9 @@ export function selfEditSchema(maxFamily: number) {
       .array(participantSchema().extend({ id: z.string().max(64).optional() }))
       .min(1, "Minimal 1 peserta.")
       .max(maxFamily, `Maksimal ${maxFamily} peserta.`),
+  }).refine((v) => v.participants[0]?.ageGroup === "dewasa", {
+    path: ["participants", 0, "ageGroup"],
+    error: REGISTRANT_MUST_BE_ADULT,
   });
 }
 

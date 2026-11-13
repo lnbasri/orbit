@@ -2,21 +2,28 @@ import { useState } from "react";
 import { Form, Link, data, useSearchParams } from "react-router";
 import {
   ArrowDownTrayIcon,
+  BanknotesIcon,
+  CheckBadgeIcon,
+  CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   FunnelIcon,
   MagnifyingGlassIcon,
+  NoSymbolIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 
 import type { Route } from "./+types/registrations";
-import { EmptyState, PageHeader, Panel, StatusBadge } from "~/components/admin";
+import { ActionButton, DeleteRegistrationButton, EmptyState, PageHeader, Panel, StatusBadge } from "~/components/admin";
 import { ListboxSelect, TextField, type SelectOption } from "~/components/forms";
 import { buttonClass } from "~/components/ui";
+import { handleAdminIntent } from "~/lib/admin-actions.server";
+import { adminEmailContext } from "~/lib/admin-context";
 import { listRegistrations, type RegistrationFilters } from "~/lib/admin.server";
 import { getEventBySlug } from "~/lib/db.server";
 import { getAppEnv } from "~/lib/env.server";
 import { formatDateTime, formatEuro, PAYMENT_STATUS_LABEL } from "~/lib/format";
+import type { RegistrationListRow } from "~/lib/admin.server";
 
 function filtersFrom(url: URL): RegistrationFilters {
   const p = url.searchParams;
@@ -38,12 +45,129 @@ export async function loader({ url }: Route.LoaderArgs) {
   return { filters, ...(await listRegistrations(env.DB, event, filters)) };
 }
 
+export async function action({ request, context }: Route.ActionArgs) {
+  return handleAdminIntent(getAppEnv(), context.get(adminEmailContext), await request.formData());
+}
+
+/** Quick actions for one record: verify / reject an unverified member, confirm a pending payment. */
+function rowActions(r: RegistrationListRow) {
+  return {
+    member: !!r.is_member && r.status === "accepted" && !r.membership_verified_at,
+    payment: r.effective_status === "pending_payment" && r.payment_status === "pending",
+    revive: !!r.is_member && r.status === "rejected_membership",
+  };
+}
+
+function RowActions({ r }: { r: RegistrationListRow }) {
+  const a = rowActions(r);
+  const name = r.registrant_name;
+  return (
+    <div className="flex items-start gap-3">
+    <div className="flex min-w-0 flex-1 flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+      {a.revive ? (
+        <ActionButton
+          intent="verify-membership"
+          registrationId={r.id}
+          label="Validasi anggota (aktifkan kembali)"
+          icon={CheckBadgeIcon}
+          tone="primary"
+          size="md"
+          fullWidthOnMobile
+          confirm={{
+            title: "Aktifkan kembali pendaftaran",
+            description: (
+              <>
+                Keanggotaan <strong>{name}</strong> ternyata valid? Pendaftaran akan diaktifkan kembali dan QR Code baru
+                dikirim ke pendaftar.
+              </>
+            ),
+            confirmLabel: "Ya, aktifkan kembali",
+            tone: "info",
+            icon: CheckBadgeIcon,
+          }}
+        />
+      ) : null}
+      {a.member ? (
+        <>
+          <ActionButton
+            intent="verify-membership"
+            registrationId={r.id}
+            label="Validasi anggota"
+            icon={CheckBadgeIcon}
+            tone="primary"
+            size="md"
+            fullWidthOnMobile
+            confirm={{
+              title: "Validasi keanggotaan",
+              description: (
+                <>
+                  Apakah <strong>{name}</strong> sudah dicek dan benar terdaftar di daftar anggota PPME Den Haag?
+                </>
+              ),
+              confirmLabel: "Ya, anggota valid",
+              tone: "info",
+              icon: CheckBadgeIcon,
+            }}
+          />
+          <ActionButton
+            intent="reject-membership"
+            registrationId={r.id}
+            label="Tolak (bukan anggota)"
+            icon={NoSymbolIcon}
+            tone="danger"
+            size="md"
+            fullWidthOnMobile
+            confirm={{
+              title: "Tolak pendaftaran",
+              description: (
+                <>
+                  Keanggotaan <strong>{name}</strong> tidak dapat divalidasi? Pendaftaran akan ditolak, QR Code
+                  dibatalkan dan kursi dibebaskan. Tidak ada email otomatis yang dikirim.
+                </>
+              ),
+              confirmLabel: "Ya, tolak",
+              tone: "danger",
+              icon: NoSymbolIcon,
+            }}
+          />
+        </>
+      ) : null}
+      {a.payment ? (
+        <ActionButton
+          intent="confirm-payment"
+          registrationId={r.id}
+          label="Verifikasi pembayaran"
+          icon={CheckIcon}
+          tone="success"
+          size="md"
+          fullWidthOnMobile
+          confirm={{
+            title: "Verifikasi pembayaran",
+            description: (
+              <>
+                Pembayaran <strong>{name}</strong> ({r.payment_code}, {formatEuro(r.amount_cents)}) sudah benar-benar
+                diterima di rekening PPME? QR Code akan langsung dikirim ke pendaftar.
+              </>
+            ),
+            confirmLabel: "Ya, pembayaran diterima",
+            tone: "info",
+            icon: BanknotesIcon,
+          }}
+        />
+      ) : null}
+    </div>
+    <DeleteRegistrationButton registrationId={r.id} name={name} />
+    </div>
+  );
+}
+
 const STATUS_OPTIONS: SelectOption[] = [
   { value: "", label: "Semua status" },
   { value: "accepted", label: "Diterima" },
   { value: "pending_payment", label: "Menunggu pembayaran" },
   { value: "expired", label: "Kedaluwarsa" },
   { value: "rejected_quota", label: "Ditolak (kuota)" },
+  { value: "rejected_membership", label: "Ditolak (keanggotaan tidak valid)" },
 ];
 const MEMBER_OPTIONS: SelectOption[] = [
   { value: "", label: "Anggota & non-anggota" },
@@ -141,10 +265,10 @@ export default function Registrations({ loaderData }: Route.ComponentProps) {
         ) : (
           <>
             {/* Mobile: list */}
-            <ul className="divide-y divide-slate-100 md:hidden">
+            <ul className="divide-y divide-slate-300 md:hidden">
               {rows.map((r) => (
-                <li key={r.id}>
-                  <Link to={`/admin/registrations/${r.id}`} className="block px-4 py-3.5 active:bg-slate-50">
+                <li key={r.id} className="py-2">
+                  <Link to={`/admin/registrations/${r.id}`} className="block px-4 pt-3.5 pb-3 active:bg-slate-50">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="font-semibold text-slate-900">{r.registrant_name}</div>
@@ -159,6 +283,9 @@ export default function Registrations({ loaderData }: Route.ComponentProps) {
                       <span className="text-slate-400">{formatDateTime(r.created_at)}</span>
                     </div>
                   </Link>
+                  <div className="px-4 pb-4">
+                    <RowActions r={r} />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -177,10 +304,10 @@ export default function Registrations({ loaderData }: Route.ComponentProps) {
                     <th className="px-4 py-2.5 text-right font-semibold sm:pr-5">Check-in</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {rows.map((r) => (
-                    <tr key={r.id} className="transition-colors hover:bg-brand-50/40">
-                      <td className="px-4 py-3 whitespace-nowrap text-slate-500 tabular-nums sm:pl-5">
+                {rows.map((r) => (
+                  <tbody key={r.id} className="border-t border-slate-300 first:border-t-0">
+                    <tr className="transition-colors hover:bg-brand-50/40">
+                      <td className="px-4 py-4 whitespace-nowrap text-slate-500 tabular-nums sm:pl-5">
                         {formatDateTime(r.created_at)}
                       </td>
                       <td className="px-4 py-3">
@@ -192,28 +319,33 @@ export default function Registrations({ loaderData }: Route.ComponentProps) {
                         </Link>
                         <div className="text-xs text-slate-500">{r.email}</div>
                       </td>
-                      <td className="px-4 py-3 text-slate-700">
+                      <td className="px-4 py-4 text-slate-700">
                         {r.is_member ? "Anggota" : "Non-anggota"}
                         {r.source === "manual" ? <span className="ml-1 text-xs text-slate-500">(manual)</span> : null}
                         {r.is_member && r.status === "accepted" && !r.membership_verified_at ? (
                           <div className="text-xs text-amber-700">belum diverifikasi</div>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3 text-right text-slate-700 tabular-nums">{r.people}</td>
+                      <td className="px-4 py-4 text-right text-slate-700 tabular-nums">{r.people}</td>
                       <td className="px-4 py-3">
                         <StatusBadge status={r.effective_status} />
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-600">
+                      <td className="px-4 py-4 text-xs text-slate-600">
                         {r.payment_code ? <div className="font-mono text-slate-900">{r.payment_code}</div> : null}
                         {PAYMENT_STATUS_LABEL[r.payment_status]}
                         {r.amount_cents ? ` · ${formatEuro(r.amount_cents)}` : ""}
                       </td>
-                      <td className="px-4 py-3 text-right text-slate-700 tabular-nums sm:pr-5">
+                      <td className="px-4 py-4 text-right text-slate-700 tabular-nums sm:pr-5">
                         {r.checked_in}/{r.people}
                       </td>
                     </tr>
-                  ))}
-                </tbody>
+                    <tr>
+                      <td colSpan={7} className="px-4 pt-1 pb-4 sm:px-5">
+                        <RowActions r={r} />
+                      </td>
+                    </tr>
+                  </tbody>
+                ))}
               </table>
             </div>
 

@@ -5,6 +5,7 @@ import {
   CheckCircleIcon,
   ClockIcon,
   EnvelopeIcon,
+  IdentificationIcon,
   LockClosedIcon,
   MicrophoneIcon,
   NoSymbolIcon,
@@ -105,7 +106,7 @@ export function HeaderSection({ event }: { event: PublicEvent }) {
             icon={BanknotesIcon}
             label="Biaya"
             value="Anggota gratis"
-            sub={`Non-anggota ${formatEuro(event.priceCents)} per orang`}
+            sub={`Non-anggota ${formatEuro(event.priceCents)} per orang (remaja & dewasa)`}
           />
         )}
       </dl>
@@ -139,6 +140,7 @@ const RULE_ICONS: Record<RuleKey, typeof UsersIcon> = {
   quota: UserGroupIcon,
   closed: NoSymbolIcon,
   fee: BanknotesIcon,
+  membership: IdentificationIcon,
   qr: QrCodeIcon,
   email: EnvelopeIcon,
   once: CheckCircleIcon,

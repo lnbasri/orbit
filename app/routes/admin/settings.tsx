@@ -185,7 +185,7 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
           <input type="hidden" name="intent" value="save-event-price" />
           <TextField
             name="price"
-            label="Biaya non-anggota per orang (€)"
+            label="Biaya non-anggota per orang remaja/dewasa (€)"
             inputMode="decimal"
             defaultValue={price}
             placeholder="10"
@@ -203,7 +203,7 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
         </priceFetcher.Form>
         <Notice result={priceFetcher.data} className="mt-4" />
         <ul className="mt-6 space-y-2 border-t border-slate-100 pt-5 text-xs text-slate-500">
-          <Hint icon={BanknotesIcon}>Biaya saat ini: {formatEuro(priceCents)} per orang. Anggota tetap gratis.</Hint>
+          <Hint icon={BanknotesIcon}>Biaya saat ini: {formatEuro(priceCents)} per orang remaja/dewasa. Balita, anak, dan anggota gratis.</Hint>
           <Hint icon={InformationCircleIcon}>Setiap perubahan dicatat di audit log.</Hint>
         </ul>
       </Panel>

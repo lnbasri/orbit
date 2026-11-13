@@ -59,6 +59,13 @@ export const callout = (inner: string, accent = BRAND, bg = "#F0F5FC", color = "
   `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0;background-color:${bg};border-left:3px solid ${accent};">` +
   `<tr><td style="padding:14px 16px;font-family:${FONT};font-size:13px;line-height:21px;color:${color};">${inner}</td></tr></table>`;
 
+/** Bulletproof button link (table cell carries the background so Outlook renders it too). */
+export const buttonLink = (label: string, href: string) =>
+  `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 16px 0;">` +
+  `<tr><td align="center" bgcolor="${BRAND}" style="background-color:${BRAND};">` +
+  `<a href="${escapeHtml(href)}" target="_blank" style="display:inline-block;padding:13px 26px;font-family:${FONT};font-size:15px;line-height:20px;font-weight:700;color:#FFFFFF;text-decoration:none;background-color:${BRAND};border:1px solid ${BRAND_DARK};">${escapeHtml(label)}</a>` +
+  `</td></tr></table>`;
+
 /** Big monospaced code panel with a footer strip (the payment code, like the PIN in the login-code email). */
 export const codePanel = (label: string, code: string, footerHtml: string) =>
   `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0;background-color:#F0F5FC;border:1px solid #C7D8F0;">` +

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, CheckCircleIcon, TrashIcon, XCircleIcon } from "@heroicons/react/24/outline";
 import { Link, useFetcher } from "react-router";
 
 import { ConfirmDialog, type ConfirmConfig } from "~/components/ConfirmDialog";
@@ -11,6 +11,7 @@ const STATUS_STYLE: Record<string, { badge: string; dot: string }> = {
   pending_payment: { badge: "bg-amber-50 text-amber-800 ring-amber-600/25", dot: "bg-amber-500" },
   expired: { badge: "bg-slate-50 text-slate-600 ring-slate-500/20", dot: "bg-slate-400" },
   rejected_quota: { badge: "bg-red-50 text-red-700 ring-red-600/20", dot: "bg-red-500" },
+  rejected_membership: { badge: "bg-rose-50 text-rose-700 ring-rose-600/20", dot: "bg-rose-500" },
 };
 
 export function StatusBadge({ status }: { status: string }) {
@@ -193,7 +194,32 @@ export function Flash({ result }: { result?: { ok: boolean; message: string } | 
   return <Notice result={result} className="mb-4" />;
 }
 
-const TONE_VARIANT = { primary: "primary", success: "success", neutral: "secondary", danger: "danger" } as const;
+/** Trash icon button with a red yes/no confirmation naming the registrant. Permanent; written to the audit log. */
+export function DeleteRegistrationButton({ registrationId, name }: { registrationId: string; name: string }) {
+  return (
+    <ActionButton
+      intent="delete-registration"
+      registrationId={registrationId}
+      label="Hapus pendaftaran"
+      icon={TrashIcon}
+      iconOnly
+      confirm={{
+        title: "Hapus pendaftaran",
+        description: (
+          <>
+            Hapus pendaftaran <strong>{name}</strong> beserta seluruh pesertanya secara permanen? Tindakan ini tidak
+            dapat dibatalkan (dicatat di audit log).
+          </>
+        ),
+        confirmLabel: "Ya, hapus",
+        tone: "danger",
+        icon: TrashIcon,
+      }}
+    />
+  );
+}
+
+const TONE_VARIANT ={ primary: "primary", success: "success", neutral: "secondary", danger: "danger" } as const;
 
 /**
  * Posts an admin intent to the current route. With `confirm`, a modal asks first
@@ -207,6 +233,9 @@ export function ActionButton({
   extra,
   tone = "primary",
   icon: Icon,
+  size = "sm",
+  fullWidthOnMobile = false,
+  iconOnly = false,
 }: {
   intent: string;
   registrationId?: string;
@@ -215,6 +244,11 @@ export function ActionButton({
   extra?: Record<string, string>;
   tone?: keyof typeof TONE_VARIANT;
   icon?: IconComponent;
+  size?: "sm" | "md";
+  /** Full-width, taller tap target below the md breakpoint (where the list switches to a table) (used for the per-row actions). */
+  fullWidthOnMobile?: boolean;
+  /** Square red-outline icon button (label becomes the aria-label/tooltip), e.g. the trash button. */
+  iconOnly?: boolean;
 }) {
   const fetcher = useFetcher<{ ok: boolean; message: string }>();
   const [asking, setAsking] = useState(false);
@@ -223,15 +257,21 @@ export function ActionButton({
   const submit = () => fetcher.submit({ intent, ...(registrationId ? { registrationId } : {}), ...extra }, { method: "post" });
 
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-2">
+    <span className={`inline-flex flex-wrap items-center gap-x-3 gap-y-2 ${fullWidthOnMobile ? "w-full md:w-auto" : ""}`}>
       <button
         type="button"
         disabled={busy}
         onClick={() => (confirm ? setAsking(true) : submit())}
-        className={buttonClass(TONE_VARIANT[tone], "sm")}
+        aria-label={iconOnly ? label : undefined}
+        title={iconOnly ? label : undefined}
+        className={
+          iconOnly
+            ? "inline-flex size-11 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:text-slate-400 md:size-10"
+            : buttonClass(TONE_VARIANT[tone], size, fullWidthOnMobile ? "w-full md:w-auto" : "")
+        }
       >
-        {busy ? <Spinner /> : Icon ? <Icon className="size-4" aria-hidden="true" /> : null}
-        {busy ? "Memproses…" : label}
+        {busy ? <Spinner /> : Icon ? <Icon className={iconOnly ? "size-5" : "size-4"} aria-hidden="true" /> : null}
+        {iconOnly ? null : busy ? "Memproses…" : label}
       </button>
       {fetcher.data ? (
         <span

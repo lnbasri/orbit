@@ -4,8 +4,9 @@ import { getParticipants, getRegistration, type EventRow } from "../app/lib/db.s
 import { deliverEmail, type Attachment } from "../app/lib/email/send.server";
 import { TICKET_TOKEN_PATTERN } from "../app/lib/ids";
 import { runDeadlineJob } from "../app/lib/jobs.server";
-import { confirmPayment, setMembershipVerified } from "../app/lib/payments.server";
+import { confirmPayment, deleteRegistration, rejectMembership, setMembershipVerified } from "../app/lib/payments.server";
 import { registerOnline } from "../app/lib/registration.server";
+import { registrationSchema } from "../app/lib/validation";
 import { T0, decodeQrPng, emailCfg, hours, input, resetDb, startDb } from "./helpers";
 
 let db: D1Database;
@@ -72,6 +73,27 @@ describe("non-member registration and payment", () => {
     expect(a.payDeadline).toBe(hours(6).toISOString());
     const people = await getParticipants(db, a.registrationId);
     expect(people.every((p) => p.status === "pending_payment" && p.qr_token === null)).toBe(true);
+  });
+
+  it("only remaja and dewasa pay; balita and anak are free but still take a seat", async () => {
+    const base = input({ membership: "Tidak", people: 4 });
+    base.participants.forEach((p, i) => (p.ageGroup = ["dewasa", "remaja", "anak", "balita"][i]));
+    const r = await registerOnline(db, event, base, opts());
+    expect(r).toMatchObject({ kind: "pending_payment", amountCents: 1000 });
+    expect(await getParticipants(db, (r as { registrationId: string }).registrationId)).toHaveLength(4);
+  });
+
+  it("the registrant (participant 1) must be dewasa, for members and non-members", () => {
+    for (const membership of ["Ya", "Tidak"] as const) {
+      for (const ageGroup of ["balita", "anak", "remaja"] as const) {
+        const i = input({ membership, people: 2 });
+        i.participants[0].ageGroup = ageGroup;
+        const r = registrationSchema(8).safeParse(i);
+        expect(r.success).toBe(false);
+        expect(r.error!.issues[0].path).toEqual(["participants", 0, "ageGroup"]);
+      }
+    }
+    expect(registrationSchema(8).safeParse(input({ people: 2 })).success).toBe(true);
   });
 
   it("admin confirmation accepts the family and issues ticket codes; a second confirmation is refused", async () => {
@@ -213,5 +235,77 @@ describe("membership verification (N6)", () => {
     if (a.kind !== "accepted") throw new Error(a.kind);
     expect((await setMembershipVerified(db, a.registrationId, "admin@test", true, hours(1))).ok).toBe(true);
     expect(await getRegistration(db, a.registrationId)).toMatchObject({ membership_verified_by: "admin@test" });
+  });
+
+  it("reject: invalidates tickets, frees the email and quota, and cannot hit a verified member", async () => {
+    const a = await registerOnline(db, event, input({ people: 2, email: "same-a@example.com" }), opts());
+    if (a.kind !== "accepted") throw new Error(a.kind);
+    expect((await rejectMembership(db, a.registrationId, "admin@test", hours(1))).ok).toBe(true);
+    expect(await getRegistration(db, a.registrationId)).toMatchObject({ status: "rejected_membership", payment_status: "not_processed" });
+    const people = await getParticipants(db, a.registrationId);
+    expect(people.every((p) => p.status === "rejected" && p.qr_token === null)).toBe(true);
+    const audit = await db.prepare("SELECT action FROM audit_log WHERE target = ?").bind(a.registrationId).all<{ action: string }>();
+    expect(audit.results.map((r) => r.action)).toContain("membership.reject");
+    // second reject is a no-op, and the same email may register again
+    expect((await rejectMembership(db, a.registrationId, "admin@test", hours(2))).ok).toBe(false);
+    expect((await registerOnline(db, event, input({ people: 1, email: "same-a@example.com" }), opts(hours(3)))).kind).toBe("accepted");
+
+    const b = await registerOnline(db, event, input({ email: "other@example.com" }), opts());
+    if (b.kind !== "accepted") throw new Error(b.kind);
+    await setMembershipVerified(db, b.registrationId, "admin@test", true, hours(1));
+    expect((await rejectMembership(db, b.registrationId, "admin@test", hours(2))).ok).toBe(false);
+  });
+});
+
+describe("revive and delete", () => {
+  it("verifying a rejected member re-activates it with fresh QR codes and a re-queued confirmation", async () => {
+    const a = await registerOnline(db, event, input({ people: 2 }), opts());
+    if (a.kind !== "accepted") throw new Error(a.kind);
+    const before = (await getParticipants(db, a.registrationId)).map((p) => p.qr_token);
+    await rejectMembership(db, a.registrationId, "admin@test", hours(1));
+    const res = await setMembershipVerified(db, a.registrationId, "admin@test", true, hours(2));
+    expect(res).toMatchObject({ ok: true, revived: true });
+    expect(await getRegistration(db, a.registrationId)).toMatchObject({
+      status: "accepted",
+      payment_status: "free",
+      membership_verified_by: "admin@test",
+    });
+    const people = await getParticipants(db, a.registrationId);
+    expect(people.every((p) => p.status === "accepted" && p.qr_token && !before.includes(p.qr_token))).toBe(true);
+    const log = await db
+      .prepare("SELECT status FROM email_log WHERE registration_id = ? AND kind = 'confirmation'")
+      .bind(a.registrationId)
+      .first<{ status: string }>();
+    expect(log?.status).toBe("pending");
+  });
+
+  it("does not revive while another active registration uses the same email", async () => {
+    const a = await registerOnline(db, event, input({ email: "same-b@example.com" }), opts());
+    if (a.kind !== "accepted") throw new Error(a.kind);
+    await rejectMembership(db, a.registrationId, "admin@test", hours(1));
+    expect((await registerOnline(db, event, input({ email: "same-b@example.com" }), opts(hours(2)))).kind).toBe("accepted");
+    const res = await setMembershipVerified(db, a.registrationId, "admin@test", true, hours(3));
+    expect(res.ok).toBe(false);
+    expect((await getRegistration(db, a.registrationId))?.status).toBe("rejected_membership");
+  });
+
+  it("delete removes the registration with its rows and writes the audit log; refused after check-in", async () => {
+    const a = await registerOnline(db, event, input({ people: 2 }), opts());
+    if (a.kind !== "accepted") throw new Error(a.kind);
+    expect((await deleteRegistration(db, a.registrationId, "admin@test", hours(1))).ok).toBe(true);
+    expect(await getRegistration(db, a.registrationId)).toBeNull();
+    expect(await getParticipants(db, a.registrationId)).toHaveLength(0);
+    const audit = await db
+      .prepare("SELECT action, detail FROM audit_log WHERE target = ? AND action = 'registration.delete'")
+      .bind(a.registrationId)
+      .first<{ action: string; detail: string }>();
+    expect(audit?.detail).toContain("people");
+    expect((await deleteRegistration(db, a.registrationId, "admin@test", hours(2))).ok).toBe(false);
+
+    const b = await registerOnline(db, event, input({ email: "b@example.com" }), opts());
+    if (b.kind !== "accepted") throw new Error(b.kind);
+    await db.prepare("UPDATE participants SET checked_in_at = ? WHERE registration_id = ?").bind(hours(1).toISOString(), b.registrationId).run();
+    expect((await deleteRegistration(db, b.registrationId, "admin@test", hours(2))).ok).toBe(false);
+    expect(await getRegistration(db, b.registrationId)).not.toBeNull();
   });
 });

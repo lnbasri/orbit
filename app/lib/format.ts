@@ -64,6 +64,7 @@ export const REGISTRATION_STATUS_LABEL: Record<string, string> = {
   pending_payment: "Menunggu Pembayaran",
   expired: "Kedaluwarsa",
   rejected_quota: "Ditolak – kuota tidak mencukupi",
+  rejected_membership: "Ditolak – keanggotaan tidak valid",
 };
 
 export const PAYMENT_STATUS_LABEL: Record<string, string> = {
@@ -130,14 +131,21 @@ export function utcIsoToLocalInput(iso: string | null | undefined, tz = EVENT_TZ
 /** Upper bound for a seat quota (admin settings). */
 export const MAX_QUOTA = 1000;
 
-export const AGE_GROUPS = ["anak", "remaja", "dewasa"] as const;
+export const AGE_GROUPS = ["balita", "anak", "remaja", "dewasa"] as const;
 export type AgeGroup = (typeof AGE_GROUPS)[number];
 export const AGE_GROUP_LABEL: Record<string, string> = {
-  anak: "Anak (0 – <12 tahun)",
+  balita: "Balita (di bawah 5 tahun)",
+  anak: "Anak (5 – <12 tahun)",
   remaja: "Remaja (12 – <18 tahun)",
   dewasa: "Dewasa (18 tahun ke atas)",
 };
-export const AGE_GROUP_SHORT: Record<string, string> = { anak: "Anak", remaja: "Remaja", dewasa: "Dewasa" };
+export const AGE_GROUP_SHORT: Record<string, string> = { balita: "Balita", anak: "Anak", remaja: "Remaja", dewasa: "Dewasa" };
+
+/** Only these age groups pay the non-member fee; balita and anak attend free. */
+export const PAYING_AGE_GROUPS: readonly string[] = ["remaja", "dewasa"];
+export const isPayingAgeGroup = (g: string) => PAYING_AGE_GROUPS.includes(g);
+/** Number of participants who pay (remaja + dewasa). */
+export const payingCount = (participants: { ageGroup: string }[]) => participants.filter((p) => isPayingAgeGroup(p.ageGroup)).length;
 
 // --- CSV export: Indonesian headers and values (lowercase, as the committee reads them in Excel) ---
 
@@ -146,6 +154,7 @@ const CSV_REGISTRATION_STATUS: Record<string, string> = {
   pending_payment: "menunggu pembayaran",
   expired: "kedaluwarsa",
   rejected_quota: "ditolak (kuota penuh)",
+  rejected_membership: "ditolak (keanggotaan tidak valid)",
 };
 const CSV_PARTICIPANT_STATUS: Record<string, string> = {
   accepted: "diterima",

@@ -1,3 +1,4 @@
+import { payingCount } from "./format";
 import { SEATS_USED_SQL, getParticipants, seatsUsed, type EventRow, type ParticipantRow, type RegistrationRow } from "./db.server";
 import type { EmailKind } from "./email/send.server";
 import { newId, newTicketToken } from "./ids";
@@ -114,7 +115,7 @@ export async function updateOwnRegistration(
   }
   const removed = current.filter((p) => !keptIds.includes(p.id));
   const people = input.participants.length;
-  const amountCents = reg.is_member ? 0 : people * event.price_non_member_cents;
+  const amountCents = reg.is_member ? 0 : payingCount(input.participants) * event.price_non_member_cents;
 
   const participantsChanged =
     removed.length > 0 ||

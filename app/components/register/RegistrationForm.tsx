@@ -62,7 +62,7 @@ export function RegistrationForm({
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const touch = (key: string) => setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
   const [count, setCount] = useState(1);
-  const [participants, setParticipants] = useState<ParticipantDraft[]>([emptyParticipant()]);
+  const [participants, setParticipants] = useState<ParticipantDraft[]>([{ ...emptyParticipant(), ageGroup: "dewasa" }]);
   const [firstNameTouched, setFirstNameTouched] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState("");
   const [review, setReview] = useState<ReviewSummary | null>(null);
@@ -183,7 +183,7 @@ export function RegistrationForm({
                 {
                   value: "Tidak",
                   label: "Bukan anggota",
-                  hint: quotaFull.nonMember ? "Kuota penuh" : `${formatEuro(event.priceCents)} per orang`,
+                  hint: quotaFull.nonMember ? "Kuota penuh" : `${formatEuro(event.priceCents)} per orang (remaja & dewasa)`,
                   disabled: quotaFull.nonMember,
                 },
               ]}
@@ -242,7 +242,7 @@ export function RegistrationForm({
         <FormSection
           icon={UserGroupIcon}
           title="Data seluruh peserta"
-          description="Tahun lahir dan jenis kelamin diperlukan untuk pengaturan tempat dan kategori usia."
+          description="Kelompok usia dan jenis kelamin diperlukan untuk pengaturan tempat dan kategori usia."
         >
           <div className="divide-y divide-slate-200/80">
             {participants.map((p, i) => (
@@ -287,6 +287,14 @@ export function RegistrationForm({
                     ]}
                     className="sm:col-span-2"
                   />
+                  {i === 0 ? (
+                    <>
+                      <input type="hidden" name={`p${i}_ageGroup`} value="dewasa" />
+                      <p className="text-[13px] text-slate-500 sm:col-span-2">
+                        Pendaftar harus berusia dewasa (18 tahun ke atas).
+                      </p>
+                    </>
+                  ) : (
                   <ChoiceField
                     label="Kelompok usia"
                     name={`p${i}_ageGroup`}
@@ -297,12 +305,14 @@ export function RegistrationForm({
                     }}
                     error={errors[`participants.${i}.ageGroup`]}
                     options={[
-                      { value: "anak", label: "Anak", hint: "0 – di bawah 12 tahun" },
+                      { value: "balita", label: "Balita", hint: "di bawah 5 tahun" },
+                      { value: "anak", label: "Anak", hint: "5 – di bawah 12 tahun" },
                       { value: "remaja", label: "Remaja", hint: "12 – di bawah 18 tahun" },
                       { value: "dewasa", label: "Dewasa", hint: "18 tahun ke atas" },
                     ]}
                     className="sm:col-span-2"
                   />
+                  )}
                 </div>
               </fieldset>
             ))}
@@ -326,7 +336,7 @@ export function RegistrationForm({
                   setConsent(v);
                 }} invalid={!!errors.consent} required>
                 Saya menyetujui pemrosesan data saya dan seluruh peserta yang saya daftarkan untuk keperluan kajian
-                keagamaan ini, dan saya berwenang mendaftarkan mereka.
+                keagamaan ini, saya berwenang mendaftarkan mereka, dan saya menyatakan bahwa saya sebagai pendaftar berusia 18 tahun ke atas (dewasa).
               </CheckField>
               {errors.consent ? (
                 <p className="mt-1.5 flex items-center gap-1.5 pl-8 text-[13px] font-medium text-red-600">
