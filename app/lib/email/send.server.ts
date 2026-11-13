@@ -87,6 +87,8 @@ async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: stri
         cid: `qr${i + 1}`,
       })),
       manage,
+      contact: cfg.replyTo,
+      origin: cfg.publicUrl,
     });
     return { to: reg.email, subject, html, attachments, rev };
   }
@@ -103,6 +105,8 @@ async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: stri
       payDeadline: reg.pay_deadline,
       bank: cfg.bank,
       manage,
+      contact: cfg.replyTo,
+      origin: cfg.publicUrl,
     });
     return { to: reg.email, subject, html, attachments: [], rev };
   }
@@ -115,6 +119,8 @@ async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: stri
       payDeadline: reg.pay_deadline,
       bank: cfg.bank,
       manage,
+      contact: cfg.replyTo,
+      origin: cfg.publicUrl,
     });
     return { to: reg.email, subject, html, attachments: [], rev };
   }
@@ -122,6 +128,8 @@ async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: stri
     event,
     registrantName: reg.registrant_name,
     paymentCode: reg.payment_code,
+    contact: cfg.replyTo,
+    origin: cfg.publicUrl,
   });
   return { to: reg.email, subject, html, attachments: [], rev };
 }

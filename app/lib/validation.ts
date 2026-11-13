@@ -29,6 +29,7 @@ export function registrationSchema(maxFamily: number) {
       .min(1, "Minimal 1 peserta.")
       .max(maxFamily, `Maksimal ${maxFamily} peserta.`),
     consent: z.literal(true, { error: "Persetujuan privasi wajib dicentang." }),
+    mediaConsent: z.literal(true, { error: "Pemberitahuan dokumentasi dan siaran langsung wajib dicentang." }),
     marketingOptIn: z.boolean(),
     idempotencyKey: z.string().uuid().optional(),
   });
@@ -52,6 +53,7 @@ export function formToRegistrationDraft(form: FormData) {
     whatsapp: String(form.get("whatsapp") ?? ""),
     participants,
     consent: form.get("consent") === "on",
+    mediaConsent: form.get("mediaConsent") === "on",
     marketingOptIn: form.get("marketingOptIn") === "on",
     idempotencyKey: key || undefined,
   };

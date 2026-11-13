@@ -4,7 +4,10 @@ import { formatEuro } from "./format";
 /** A rule is a list of text parts; `{ b }` parts are emphasised (bold). */
 export type RulePart = string | { b: string };
 
-export type RuleKey = "group" | "quota" | "closed" | "fee" | "qr" | "email" | "once";
+export type RuleKey = "group" | "quota" | "closed" | "fee" | "qr" | "email" | "once" | "media";
+
+/** Bump when the documentation / live stream wording changes; stored with each acknowledgement. */
+export const MEDIA_NOTICE_VERSION = "2026-11-v1";
 
 export interface RegistrationRule {
   key: RuleKey;
@@ -41,5 +44,12 @@ export function registrationRules(e: RuleEventInfo): RegistrationRule[] {
     { key: "qr", parts: ["QR Code dikirim lewat email setelah pendaftaran diterima atau pembayaran dikonfirmasi."] },
     { key: "email", parts: [{ b: "Pastikan alamat email Anda benar, dan periksa juga folder spam." }] },
     { key: "once", parts: ["Setiap QR Code hanya dapat digunakan satu kali saat check-in."] },
+    {
+      key: "media",
+      parts: [
+        { b: "Acara ini didokumentasikan (foto/video) dan disiarkan langsung (live streaming)." },
+        " Dokumentasi dapat dipublikasikan di kanal PPME Den Haag. Bila Anda tidak ingin tampil, beri tahu panitia di lokasi atau melalui event@ppmedenhaag.nl.",
+      ],
+    },
   ];
 }

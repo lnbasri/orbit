@@ -95,6 +95,10 @@ export default function RegistrationDetail({ loaderData }: Route.ComponentProps)
                     {reg.marketing_opt_in ? " · bersedia menerima info" : ""}
                   </>,
                 ],
+                [
+                  "Dokumentasi & live stream",
+                  reg.media_consent_at ? `${formatDateTime(reg.media_consent_at)} (${reg.media_notice_version})` : "–",
+                ],
               ]}
             />
             {reg.is_member ? (

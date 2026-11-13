@@ -44,8 +44,8 @@
 		"TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
 		// "log" = store emails in the local outbox (viewable at /admin/outbox); "resend" = send via Resend.
 		"EMAIL_MODE": "log",
-		"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
-		"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
+		"EMAIL_FROM": "Panitia Kajian PPME Den Haag <event@ppmedenhaag.nl>",
+		"EMAIL_REPLY_TO": "event@ppmedenhaag.nl",
 		// Bank details shown to non-members. Public information (donation account), so plain config, not secrets.
 		"BANK_ACCOUNT_NAME": "PPME Den Haag (contoh)",
 		"BANK_IBAN": "NL00 TEST 0000 0000 00",
@@ -82,8 +82,8 @@
 				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
 				"BANK_IBAN": "NL26 INGB 0002 1661 44",
 				"EMAIL_MODE": "resend",
-				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
-				"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
+				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <event@ppmedenhaag.nl>",
+				"EMAIL_REPLY_TO": "event@ppmedenhaag.nl",
 				"ADMIN_EMAILS": "",
 				"GOOGLE_CLIENT_ID": ""
 			}
@@ -117,8 +117,8 @@
 				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
 				"BANK_IBAN": "NL26 INGB 0002 1661 44",
 				"EMAIL_MODE": "resend",
-				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
-				"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
+				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <event@ppmedenhaag.nl>",
+				"EMAIL_REPLY_TO": "event@ppmedenhaag.nl",
 				"ADMIN_EMAILS": "",
 				// Google sign-in: fill in the OAuth client id and set the GOOGLE_CLIENT_SECRET secret on this Worker.
 				// Authorised redirect URI: https://ppme-registration-admin.ppme-registration.workers.dev/admin/auth/google/callback
@@ -150,8 +150,8 @@
 				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
 				"BANK_IBAN": "NL26 INGB 0002 1661 44",
 				"EMAIL_MODE": "resend",
-				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
-				"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
+				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <event@ppmedenhaag.nl>",
+				"EMAIL_REPLY_TO": "event@ppmedenhaag.nl",
 				"ADMIN_EMAILS": "",
 				"GOOGLE_CLIENT_ID": ""
 			}
@@ -182,8 +182,8 @@
 				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
 				"BANK_IBAN": "NL26 INGB 0002 1661 44",
 				"EMAIL_MODE": "resend",
-				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
-				"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
+				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <event@ppmedenhaag.nl>",
+				"EMAIL_REPLY_TO": "event@ppmedenhaag.nl",
 				"ADMIN_EMAILS": "",
 				"GOOGLE_CLIENT_ID": ""
 			}

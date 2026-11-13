@@ -40,6 +40,7 @@ describe("validation", () => {
       p1_gender: "perempuan",
       p1_ageGroup: "anak",
       consent: "on",
+      mediaConsent: "on",
       ...extra,
     };
     for (const [k, v] of Object.entries(base)) f.append(k, v);
@@ -57,10 +58,11 @@ describe("validation", () => {
   it("requires privacy consent, valid gender and age group", () => {
     const f = form({ p1_gender: "x", p1_ageGroup: "balita" });
     f.delete("consent");
+    f.delete("mediaConsent");
     const r = registrationSchema(8).safeParse(formToRegistrationDraft(f));
     expect(r.success).toBe(false);
     const paths = r.error!.issues.map((i) => i.path.join("."));
-    expect(paths).toEqual(expect.arrayContaining(["consent", "participants.1.gender", "participants.1.ageGroup"]));
+    expect(paths).toEqual(expect.arrayContaining(["consent", "mediaConsent", "participants.1.gender", "participants.1.ageGroup"]));
   });
 
   it("enforces the maximum family size", () => {
@@ -220,6 +222,7 @@ describe("front-end validation messages", () => {
     whatsapp: "+31612345678",
     participants: [{ name: "Budi", gender: "laki-laki", ageGroup: "dewasa" }],
     consent: true,
+    mediaConsent: true,
     marketingOptIn: false,
     idempotencyKey: undefined,
   };
@@ -230,7 +233,7 @@ describe("front-end validation messages", () => {
 
   it("gives Indonesian messages for empty and malformed fields", () => {
     const errors = validateRegistrationDraft(
-      { ...ok, registrantName: " ", membership: "", email: "x", whatsapp: "", consent: false,
+      { ...ok, registrantName: " ", membership: "", email: "x", whatsapp: "", consent: false, mediaConsent: false,
         participants: [{ name: "", gender: "", ageGroup: "" }] },
       8,
     );
@@ -240,6 +243,7 @@ describe("front-end validation messages", () => {
       email: "Format email tidak valid. Contoh: nama@email.com.",
       whatsapp: "Nomor WhatsApp wajib diisi.",
       consent: "Persetujuan privasi wajib dicentang.",
+      mediaConsent: "Pemberitahuan dokumentasi dan siaran langsung wajib dicentang.",
       "participants.0.name": "Nama peserta wajib diisi.",
       "participants.0.gender": "Jenis kelamin wajib dipilih.",
       "participants.0.ageGroup": "Kelompok usia wajib dipilih.",

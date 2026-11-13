@@ -47,6 +47,8 @@ export interface RegistrationRow {
   membership_verified_by: string | null;
   consent_at: string | null;
   privacy_version: string | null;
+  media_consent_at: string | null;
+  media_notice_version: string | null;
   marketing_opt_in: number;
   idempotency_key: string | null;
   notes: string | null;

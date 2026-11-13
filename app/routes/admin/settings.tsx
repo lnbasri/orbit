@@ -10,6 +10,7 @@ import {
   InformationCircleIcon,
   LockClosedIcon,
   LockOpenIcon,
+  MicrophoneIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
 
@@ -37,6 +38,8 @@ export async function loader() {
   return {
     quota,
     title: event.title,
+    speaker: event.speaker ?? "",
+    theme: event.theme ?? "",
     startsAt: event.starts_at,
     opensAt: utcIsoToLocalInput(event.registration_opens_at),
     closesAt: utcIsoToLocalInput(event.registration_closes_at),
@@ -52,8 +55,10 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { title, startsAt, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota } = loaderData;
+  const { title, speaker, theme, startsAt, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota } = loaderData;
   const fetcher = useFetcher<{ ok: boolean; message: string }>();
+  const detailsFetcher = useFetcher<{ ok: boolean; message: string }>();
+  const detailsBusy = detailsFetcher.state !== "idle";
   const priceFetcher = useFetcher<{ ok: boolean; message: string }>();
   const priceBusy = priceFetcher.state !== "idle";
   const busy = fetcher.state !== "idle";
@@ -87,6 +92,10 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
               {busy ? <Spinner /> : <CheckCircleIcon className="size-4" aria-hidden="true" />}
               {busy ? "Menyimpan…" : "Simpan jadwal"}
             </button>
+            <button type="reset" disabled={busy} className={buttonClass("secondary", "md", "mt-2 w-full sm:mt-0 sm:ml-2 sm:w-auto")}>
+              <ArrowUturnLeftIcon className="size-4" aria-hidden="true" />
+              Reset
+            </button>
           </div>
         </fetcher.Form>
         <Notice result={fetcher.data} className="mt-4" />
@@ -99,6 +108,31 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
             Pendaftaran juga ditutup otomatis bila kuota sudah penuh, berapa pun batas waktunya.
           </Hint>
           <Hint icon={InformationCircleIcon}>Perubahan berlaku seketika di formulir publik.</Hint>
+        </ul>
+      </Panel>
+
+      <Panel title="Pemateri dan tema" icon={MicrophoneIcon} className="mt-6">
+        <detailsFetcher.Form method="post" className="grid gap-4">
+          <input type="hidden" name="intent" value="save-event-details" />
+          <TextField name="speaker" label="Pemateri" defaultValue={speaker} maxLength={120} placeholder="dr. Aisah Dahlan" />
+          <TextField name="theme" label="Tema" defaultValue={theme} maxLength={200} placeholder="Tema kajian" />
+          <div>
+            <button type="submit" disabled={detailsBusy} className={buttonClass("primary", "md", "w-full sm:w-auto")}>
+              {detailsBusy ? <Spinner /> : <CheckCircleIcon className="size-4" aria-hidden="true" />}
+              {detailsBusy ? "Menyimpan…" : "Simpan pemateri dan tema"}
+            </button>
+            <button type="reset" disabled={detailsBusy} className={buttonClass("secondary", "md", "mt-2 w-full sm:mt-0 sm:ml-2 sm:w-auto")}>
+              <ArrowUturnLeftIcon className="size-4" aria-hidden="true" />
+              Reset
+            </button>
+          </div>
+        </detailsFetcher.Form>
+        <Notice result={detailsFetcher.data} className="mt-4" />
+        <ul className="mt-6 space-y-2 border-t border-slate-100 pt-5 text-xs text-slate-500">
+          <Hint icon={InformationCircleIcon}>
+            Tampil di formulir publik dan di email yang dikirim sesudahnya. Kosongkan kolom untuk menyembunyikannya. Email
+            yang sudah terkirim tidak berubah.
+          </Hint>
         </ul>
       </Panel>
 

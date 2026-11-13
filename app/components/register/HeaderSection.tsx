@@ -11,6 +11,7 @@ import {
   QrCodeIcon,
   UserGroupIcon,
   UsersIcon,
+  VideoCameraIcon,
 } from "@heroicons/react/24/outline";
 
 import { Eyebrow, Logo } from "~/components/ui";
@@ -141,6 +142,7 @@ const RULE_ICONS: Record<RuleKey, typeof UsersIcon> = {
   qr: QrCodeIcon,
   email: EnvelopeIcon,
   once: CheckCircleIcon,
+  media: VideoCameraIcon,
 };
 
 function Rule({ icon: Icon, children }: { icon: typeof UsersIcon; children: React.ReactNode }) {

@@ -395,6 +395,7 @@ function EditForm({
                     { value: "laki-laki", label: "Laki-laki" },
                     { value: "perempuan", label: "Perempuan" },
                   ]}
+                  className="sm:col-span-2"
                 />
                 <ChoiceField
                   label="Kelompok usia"

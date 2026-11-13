@@ -8,7 +8,7 @@ import type { SelfEditInput } from "./validation";
  * while allowed, edits it themselves (decision 12 Nov 2026):
  *  - members (free, accepted at once): editable until registration closes / the event starts;
  *  - non-members: editable while the payment is pending and the deadline has not passed; once the committee confirms
- *    the payment it is view-only and changes go by email to the committee (kajian@ppmedenhaag.nl);
+ *    the payment it is view-only and changes go by email to the committee (event@ppmedenhaag.nl);
  *  - manual registrations are view-only.
  * Editable: registrant name, WhatsApp, each participant's name / gender / age group, adding or removing participants.
  * Email and membership are never self-editable (email is the registration key; membership decides quota and price).

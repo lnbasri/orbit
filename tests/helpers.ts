@@ -58,6 +58,7 @@ export function input(overrides: Partial<RegistrationInput> & { people?: number 
       ageGroup: ["dewasa", "anak", "remaja"][i % 3],
     })),
     consent: true,
+    mediaConsent: true,
     marketingOptIn: false,
     ...overrides,
   } as RegistrationInput;

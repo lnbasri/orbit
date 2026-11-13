@@ -92,6 +92,42 @@ export async function updateEventPrice(
 
 
 /**
+ * Admin: set the speaker (pemateri) and theme (tema) shown on the form and in emails. Both are optional (empty = hidden).
+ * Only affects what is displayed from now on; emails already sent are not touched.
+ */
+export async function updateEventDetails(
+  db: D1Database,
+  actor: string,
+  eventId: number,
+  speakerInput: string,
+  themeInput: string,
+  now = new Date(),
+): Promise<EventResult> {
+  const event = await getEventById(db, eventId);
+  if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+  const speaker = speakerInput.trim().replace(/\s+/g, " ");
+  const theme = themeInput.trim().replace(/\s+/g, " ");
+  if (speaker.length > 120) return { ok: false, message: "Nama pemateri terlalu panjang (maksimal 120 karakter)." };
+  if (theme.length > 200) return { ok: false, message: "Tema terlalu panjang (maksimal 200 karakter)." };
+  if ((speaker || null) === event.speaker && (theme || null) === event.theme) {
+    return { ok: true, message: "Pemateri dan tema tidak berubah." };
+  }
+
+  await db.batch([
+    db.prepare("UPDATE events SET speaker = ?, theme = ? WHERE id = ?").bind(speaker || null, theme || null, eventId),
+    auditStatement(
+      db,
+      actor,
+      "event.details",
+      event.slug,
+      { from: { speaker: event.speaker, theme: event.theme }, to: { speaker: speaker || null, theme: theme || null } },
+      now.toISOString(),
+    ),
+  ]);
+  return { ok: true, message: "Pemateri dan tema disimpan." };
+}
+
+/**
  * Admin: set the seat capacity per group. A group's capacity can never go below the seats it currently
  * holds; the check is inside the UPDATE (same seat rule as registration) so a concurrent registration can't slip under it.
  */

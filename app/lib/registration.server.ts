@@ -7,6 +7,7 @@ import {
 } from "./db.server";
 import { outboxStatement } from "./email/send.server";
 import { newId, newTicketToken } from "./ids";
+import { MEDIA_NOTICE_VERSION } from "./rules";
 import type { RegistrationInput } from "./validation";
 
 export type RegisterResult =
@@ -117,10 +118,10 @@ export async function registerOnline(
         `INSERT INTO registrations (
            id, event_id, created_at, registrant_name, is_member, email, whatsapp, people, source,
            status, payment_status, payment_code, amount_cents, pay_deadline,
-           consent_at, privacy_version, marketing_opt_in, idempotency_key)
+           consent_at, privacy_version, media_consent_at, media_notice_version, marketing_opt_in, idempotency_key)
          SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, ?,
            ${isMember ? "NULL" : "(SELECT payment_prefix || printf('%06d', payment_counter) FROM events WHERE id = ?)"},
-           ?, ?, ?, ?, ?, ?
+           ?, ?, ?, ?, ?, ?, ?, ?
          WHERE (${SEATS_USED_SQL}) + ? <= (SELECT ${quotaColumn} FROM events WHERE id = ?)`,
       )
       .bind(
@@ -139,6 +140,8 @@ export async function registerOnline(
         payDeadline,
         nowIso,
         event.privacy_version,
+        nowIso,
+        MEDIA_NOTICE_VERSION,
         input.marketingOptIn ? 1 : 0,
         input.idempotencyKey ?? null,
         event.id,
@@ -219,8 +222,8 @@ export async function registerOnline(
       .prepare(
         `INSERT INTO registrations (
            id, event_id, created_at, registrant_name, is_member, email, whatsapp, people, source,
-           status, payment_status, amount_cents, consent_at, privacy_version, marketing_opt_in, idempotency_key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'online', 'rejected_quota', 'not_processed', 0, ?, ?, ?, ?)`,
+           status, payment_status, amount_cents, consent_at, privacy_version, media_consent_at, media_notice_version, marketing_opt_in, idempotency_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'online', 'rejected_quota', 'not_processed', 0, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         registrationId,
@@ -233,6 +236,8 @@ export async function registerOnline(
         people,
         nowIso,
         event.privacy_version,
+        nowIso,
+        MEDIA_NOTICE_VERSION,
         input.marketingOptIn ? 1 : 0,
         input.idempotencyKey ?? null,
       ),

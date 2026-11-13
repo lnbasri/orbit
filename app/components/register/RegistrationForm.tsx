@@ -53,6 +53,7 @@ export function RegistrationForm({
   const [registrantName, setRegistrantName] = useState("");
   const [membership, setMembership] = useState("");
   const [consent, setConsent] = useState(false);
+  const [mediaConsent, setMediaConsent] = useState(false);
   const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [email, setEmail] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
@@ -94,10 +95,10 @@ export function RegistrationForm({
   const clientErrors = useMemo(
     () =>
       validateRegistrationDraft(
-        { registrantName, membership, email, whatsapp, participants, consent, marketingOptIn, idempotencyKey: undefined },
+        { registrantName, membership, email, whatsapp, participants, consent, mediaConsent, marketingOptIn, idempotencyKey: undefined },
         event.maxFamily,
       ),
-    [registrantName, membership, email, whatsapp, participants, consent, marketingOptIn, event.maxFamily],
+    [registrantName, membership, email, whatsapp, participants, consent, mediaConsent, marketingOptIn, event.maxFamily],
   );
   const errors: FieldErrors = {};
   for (const [key, msg] of Object.entries(failure?.errors ?? {})) if (!touched.has(`edited:${key}`)) errors[key] = msg;
@@ -284,6 +285,7 @@ export function RegistrationForm({
                       { value: "laki-laki", label: "Laki-laki" },
                       { value: "perempuan", label: "Perempuan" },
                     ]}
+                    className="sm:col-span-2"
                   />
                   <ChoiceField
                     label="Kelompok usia"
@@ -330,6 +332,29 @@ export function RegistrationForm({
                 <p className="mt-1.5 flex items-center gap-1.5 pl-8 text-[13px] font-medium text-red-600">
                   <ExclamationCircleIcon className="size-4 shrink-0" aria-hidden="true" />
                   {errors.consent}
+                </p>
+              ) : null}
+            </div>
+            <div>
+              <CheckField
+                name="mediaConsent"
+                checked={mediaConsent}
+                onChange={(v) => {
+                  change("mediaConsent");
+                  setMediaConsent(v);
+                }}
+                invalid={!!errors.mediaConsent}
+                required
+              >
+                Saya memahami bahwa acara ini akan didokumentasikan (foto/video) dan disiarkan langsung (live
+                streaming), dan dokumentasi dapat dipublikasikan di kanal PPME Den Haag. Jika saya tidak ingin tampil,
+                saya akan memberi tahu panitia di lokasi atau melalui email. Saya juga menyampaikan hal ini kepada
+                peserta lain yang saya daftarkan, termasuk anak-anak.
+              </CheckField>
+              {errors.mediaConsent ? (
+                <p className="mt-1.5 flex items-center gap-1.5 pl-8 text-[13px] font-medium text-red-600">
+                  <ExclamationCircleIcon className="size-4 shrink-0" aria-hidden="true" />
+                  {errors.mediaConsent}
                 </p>
               ) : null}
             </div>

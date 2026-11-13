@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { getEventById } from "../app/lib/db.server";
-import { parseEuroToCents, updateEventPrice, updateQuotas, updateRegistrationWindow } from "../app/lib/events.server";
+import { parseEuroToCents, updateEventDetails, updateEventPrice, updateQuotas, updateRegistrationWindow } from "../app/lib/events.server";
 import { localInputToUtcIso, utcIsoToLocalInput } from "../app/lib/format";
 import { quotaSummary, registerOnline, registrationWindowError } from "../app/lib/registration.server";
 import { T0, input, resetDb, startDb } from "./helpers";
@@ -143,6 +143,23 @@ describe("admin: event price", () => {
   it("rejects invalid or zero price", async () => {
     expect((await updateEventPrice(db, "a@x.nl", 1, "0")).ok).toBe(false);
     expect((await updateEventPrice(db, "a@x.nl", 1, "x")).ok).toBe(false);
+  });
+});
+
+describe("admin: speaker and theme", () => {
+  it("saves trimmed values, allows empty, and audits", async () => {
+    expect((await updateEventDetails(db, "admin@x.nl", 1, "  Ust.  Baru ", " Tema Baru ")).ok).toBe(true);
+    let ev = (await getEventById(db, 1))!;
+    expect([ev.speaker, ev.theme]).toEqual(["Ust. Baru", "Tema Baru"]);
+    expect((await updateEventDetails(db, "admin@x.nl", 1, "", "")).ok).toBe(true);
+    ev = (await getEventById(db, 1))!;
+    expect([ev.speaker, ev.theme]).toEqual([null, null]);
+    expect(await db.prepare("SELECT 1 FROM audit_log WHERE action = 'event.details'").first()).toBeTruthy();
+  });
+
+  it("rejects over-long values", async () => {
+    expect((await updateEventDetails(db, "a@x.nl", 1, "x".repeat(121), "")).ok).toBe(false);
+    expect((await updateEventDetails(db, "a@x.nl", 1, "", "x".repeat(201))).ok).toBe(false);
   });
 });
 

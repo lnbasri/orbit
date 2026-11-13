@@ -41,8 +41,8 @@ export function isDev(env: AppEnv) {
 export function emailConfig(env: AppEnv): EmailConfig {
   return {
     mode: env.EMAIL_MODE === "resend" ? "resend" : "log",
-    from: env.EMAIL_FROM ?? "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
-    replyTo: env.EMAIL_REPLY_TO ?? "kajian@ppmedenhaag.nl",
+    from: env.EMAIL_FROM ?? "Panitia Kajian PPME Den Haag <event@ppmedenhaag.nl>",
+    replyTo: env.EMAIL_REPLY_TO ?? "event@ppmedenhaag.nl",
     resendApiKey: env.RESEND_API_KEY,
     bank: bankInfo(env),
     publicUrl: env.PUBLIC_APP_URL?.trim().replace(/\/$/, "") || undefined,

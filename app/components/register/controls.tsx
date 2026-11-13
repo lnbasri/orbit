@@ -139,12 +139,14 @@ export function ChoiceField({
         aria-invalid={error ? true : undefined}
         className="grid grid-cols-2 gap-2"
       >
-        {options.map((o) => (
+        {options.map((o, idx) => (
           <Radio
             key={o.value}
             value={o.value}
             disabled={o.disabled}
-            className={`group flex min-h-12 cursor-pointer items-center gap-3 rounded-lg border bg-white px-3.5 py-2.5 shadow-xs transition duration-150 select-none hover:border-slate-400 data-checked:border-brand data-checked:bg-brand-50/70 data-checked:shadow-[inset_0_0_0_1px_var(--color-brand)] data-focus:outline-none data-focus:ring-4 data-focus:ring-brand/15 data-disabled:cursor-not-allowed data-disabled:border-slate-200 data-disabled:bg-slate-50 data-disabled:shadow-none data-disabled:hover:border-slate-200 ${
+            className={`${
+              options.length % 2 === 1 && idx === options.length - 1 ? "col-span-2 " : ""
+            }group flex min-h-12 cursor-pointer items-center gap-3 rounded-lg border bg-white px-3.5 py-2.5 shadow-xs transition duration-150 select-none hover:border-slate-400 data-checked:border-brand data-checked:bg-brand-50/70 data-checked:shadow-[inset_0_0_0_1px_var(--color-brand)] data-focus:outline-none data-focus:ring-4 data-focus:ring-brand/15 data-disabled:cursor-not-allowed data-disabled:border-slate-200 data-disabled:bg-slate-50 data-disabled:shadow-none data-disabled:hover:border-slate-200 ${
               error ? "border-red-400" : "border-slate-300"
             }`}
           >
@@ -196,7 +198,7 @@ export function CheckField({
         checked={checked}
         onChange={onChange}
         aria-invalid={invalid ? true : undefined}
-        className={`group mt-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-[5px] border bg-white shadow-xs transition focus:outline-none data-checked:border-brand data-checked:bg-brand data-focus:ring-4 data-focus:ring-brand/20 ${
+        className={`group mt-px flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-[5px] border bg-white shadow-xs transition focus:outline-none data-checked:border-brand data-checked:bg-brand data-focus:ring-4 data-focus:ring-brand/20 ${
           invalid ? "border-red-500" : "border-slate-400"
         }`}
       >
@@ -207,7 +209,7 @@ export function CheckField({
         />
       </Checkbox>
       <div className="min-w-0">
-        <HeadlessLabel className="cursor-pointer text-sm leading-relaxed text-slate-700 select-none">
+        <HeadlessLabel className="block cursor-pointer text-sm leading-relaxed text-slate-700 select-none">
           {children}
           {required ? <RequiredMark /> : null}
         </HeadlessLabel>
