@@ -4,7 +4,7 @@ import { emailConfig, type AppEnv } from "./config.server";
 import { audit, getEventBySlug } from "./db.server";
 import { deliverEmail, type EmailKind } from "./email/send.server";
 import { runDeadlineJob } from "./jobs.server";
-import { confirmPayment, setMembershipVerified } from "./payments.server";
+import { confirmPayment, deleteRegistration, rejectMembership, setMembershipVerified } from "./payments.server";
 
 export type AdminActionResult = { ok: boolean; message: string };
 
@@ -29,8 +29,20 @@ export async function handleAdminIntent(env: AppEnv, actor: string, form: FormDa
           : `${res.message} Namun email QR gagal dikirim (${mail.error}). Sistem akan mencoba lagi otomatis.`,
       };
     }
-    case "verify-membership":
-      return setMembershipVerified(env.DB, id, actor, true);
+    case "verify-membership": {
+      const res = await setMembershipVerified(env.DB, id, actor, true);
+      if (!res.ok || !res.revived) return res;
+      // Re-activated after a rejection: the old QR codes were removed, so send the new ones right away.
+      const mail = await deliverEmail(env.DB, cfg, id, "confirmation");
+      return {
+        ok: true,
+        message: mail.ok ? res.message : `${res.message} Email QR gagal dikirim (${mail.error}); sistem akan mencoba lagi.`,
+      };
+    }
+    case "delete-registration":
+      return deleteRegistration(env.DB, id, actor);
+    case "reject-membership":
+      return rejectMembership(env.DB, id, actor);
     case "unverify-membership":
       return setMembershipVerified(env.DB, id, actor, false);
     case "resend-email": {

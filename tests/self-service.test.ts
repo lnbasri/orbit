@@ -12,7 +12,7 @@ import {
 } from "../app/lib/registrant-access.server";
 import { registerOnline } from "../app/lib/registration.server";
 import { selfEditState, updateOwnRegistration } from "../app/lib/self-service.server";
-import type { SelfEditInput } from "../app/lib/validation";
+import { selfEditSchema, type SelfEditInput } from "../app/lib/validation";
 import { T0, emailCfg, hours, input, resetDb, startDb } from "./helpers";
 
 let db: D1Database;
@@ -216,6 +216,17 @@ describe("member self-service edit", () => {
 });
 
 describe("non-member self-service edit", () => {
+  it("balita/anak do not add to the amount, and the registrant cannot be a free age group", async () => {
+    const { id, email } = await register({ membership: "Tidak", people: 1 });
+    const edit = await currentInput(id);
+    edit.participants.push({ name: "Adik", gender: "perempuan", ageGroup: "balita" });
+    const ok = await updateOwnRegistration(db, event, email, "", edit, { now: T0 });
+    expect(ok).toMatchObject({ ok: true, people: 2, amountCents: event.price_non_member_cents });
+
+    const edit2 = selfEditSchema(8).safeParse({ ...edit, participants: edit.participants.map((p, n) => (n ? p : { ...p, ageGroup: "anak" })) });
+    expect(edit2.success).toBe(false);
+  });
+
   it("before payment: count change recalculates the amount and re-queues the payment instructions", async () => {
     const { id, email } = await register({ membership: "Tidak", people: 1 });
     const before = (await getRegistration(db, id))!;

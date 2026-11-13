@@ -56,7 +56,7 @@ describe("validation", () => {
   });
 
   it("requires privacy consent, valid gender and age group", () => {
-    const f = form({ p1_gender: "x", p1_ageGroup: "balita" });
+    const f = form({ p1_gender: "x", p1_ageGroup: "bayi" });
     f.delete("consent");
     f.delete("mediaConsent");
     const r = registrationSchema(8).safeParse(formToRegistrationDraft(f));

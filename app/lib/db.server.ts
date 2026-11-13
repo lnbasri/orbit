@@ -24,7 +24,7 @@ export interface EventRow {
   status: "draft" | "open" | "closed";
 }
 
-export type RegistrationStatus = "accepted" | "pending_payment" | "expired" | "rejected_quota";
+export type RegistrationStatus = "accepted" | "pending_payment" | "expired" | "rejected_quota" | "rejected_membership";
 
 export interface RegistrationRow {
   id: string;
@@ -62,7 +62,7 @@ export interface ParticipantRow {
   registration_id: string;
   position: number;
   full_name: string;
-  age_group: "anak" | "remaja" | "dewasa";
+  age_group: "balita" | "anak" | "remaja" | "dewasa";
   gender: "laki-laki" | "perempuan" | null;
   status: "accepted" | "pending_payment" | "expired" | "rejected";
   qr_token: string | null;

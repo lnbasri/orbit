@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { data } from "react-router";
+import { data, redirect } from "react-router";
 
 import type { Route } from "./+types/registration-detail";
 import {
@@ -20,7 +20,7 @@ import {
   UsersIcon,
   XCircleIcon,
 } from "@heroicons/react/24/outline";
-import { ActionButton, DetailList, EmptyState, PageHeader, Panel, PaymentBadge, StatusBadge } from "~/components/admin";
+import { ActionButton, DeleteRegistrationButton, DetailList, EmptyState, PageHeader, Panel, PaymentBadge, StatusBadge } from "~/components/admin";
 import { buttonClass } from "~/components/ui";
 import { handleAdminIntent } from "~/lib/admin-actions.server";
 import { adminEmailContext } from "~/lib/admin-context";
@@ -45,7 +45,11 @@ export async function loader({ params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
-  return handleAdminIntent(getAppEnv(), context.get(adminEmailContext), await request.formData());
+  const form = await request.formData();
+  const result = await handleAdminIntent(getAppEnv(), context.get(adminEmailContext), form);
+  // The page no longer exists after a delete: go back to the list.
+  if (result.ok && form.get("intent") === "delete-registration") return redirect("/admin/registrations");
+  return result;
 }
 
 const EMAIL_LABEL: Record<string, string> = {
@@ -65,6 +69,7 @@ export default function RegistrationDetail({ loaderData }: Route.ComponentProps)
         back={{ to: "/admin/registrations", label: "Kembali ke daftar" }}
         eyebrow="Detail pendaftaran"
         title={reg.registrant_name}
+        actions={<DeleteRegistrationButton registrationId={reg.id} name={reg.registrant_name} />}
         description={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <StatusBadge status={effectiveStatus} />
@@ -103,7 +108,32 @@ export default function RegistrationDetail({ loaderData }: Route.ComponentProps)
             />
             {reg.is_member ? (
               <div className="mt-5 border-t border-slate-100 pt-4 text-sm">
-                {reg.membership_verified_at ? (
+                {reg.status === "rejected_membership" ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="flex items-start gap-2 text-red-700">
+                      <XCircleIcon className="mt-px size-5 shrink-0" aria-hidden="true" />
+                      <span>Pendaftaran ditolak: keanggotaan tidak valid.</span>
+                    </span>
+                    <ActionButton
+                      intent="verify-membership"
+                      registrationId={reg.id}
+                      label="Validasi anggota (aktifkan kembali)"
+                      icon={CheckBadgeIcon}
+                      confirm={{
+                        title: "Aktifkan kembali pendaftaran",
+                        description: (
+                          <>
+                            Keanggotaan <strong>{reg.registrant_name}</strong> ternyata valid? Pendaftaran akan diaktifkan
+                            kembali dan QR Code baru dikirim ke pendaftar.
+                          </>
+                        ),
+                        confirmLabel: "Ya, aktifkan kembali",
+                        tone: "info",
+                        icon: CheckBadgeIcon,
+                      }}
+                    />
+                  </div>
+                ) : reg.membership_verified_at ? (
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <span className="flex items-start gap-2 text-emerald-700">
                       <CheckBadgeIcon className="mt-px size-5 shrink-0" aria-hidden="true" />

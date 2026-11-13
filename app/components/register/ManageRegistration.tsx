@@ -19,7 +19,7 @@ import {
 import { Form, useNavigation } from "react-router";
 
 import { Callout, Eyebrow, Spinner, buttonClass } from "~/components/ui";
-import { AGE_GROUP_SHORT, GENDER_LABEL, formatDateTime, formatEuro } from "~/lib/format";
+import { AGE_GROUP_SHORT, GENDER_LABEL, formatDateTime, formatEuro, payingCount } from "~/lib/format";
 import type { FieldErrors } from "~/lib/validation";
 import { ChoiceField, TextInputField } from "./controls";
 import { EventDetailRow } from "./EventDetailRow";
@@ -262,7 +262,7 @@ function EditForm({
     initial.map((p) => ({ key: p.id, id: p.id, name: p.name, gender: p.gender, ageGroup: p.ageGroup })),
   );
   const pending = r.status === "pending_payment";
-  const newAmount = rows.length * priceCents;
+  const newAmount = payingCount(rows.map((p, i) => (i === 0 ? { ageGroup: "dewasa" } : p))) * priceCents;
 
   const errors: FieldErrors = { ...serverErrors };
   rows.forEach((p, i) => {
@@ -364,7 +364,7 @@ function EditForm({
                 ) : null}
                 <button
                   type="button"
-                  disabled={rows.length <= 1}
+                  disabled={rows.length <= 1 || i === 0}
                   onClick={() => setRows((prev) => prev.filter((_, idx) => idx !== i))}
                   className={buttonClass("ghost", "sm", "ml-auto text-red-600 hover:bg-red-50 hover:text-red-700")}
                   aria-label={`Hapus peserta ${i + 1}`}
@@ -397,6 +397,12 @@ function EditForm({
                   ]}
                   className="sm:col-span-2"
                 />
+                {i === 0 ? (
+                  <>
+                    <input type="hidden" name={`p${i}_ageGroup`} value="dewasa" />
+                    <p className="text-[13px] text-slate-500 sm:col-span-2">Pendaftar harus berusia dewasa (18 tahun ke atas).</p>
+                  </>
+                ) : (
                 <ChoiceField
                   label="Kelompok usia"
                   name={`p${i}_ageGroup`}
@@ -404,12 +410,14 @@ function EditForm({
                   onChange={(v) => update(i, { ageGroup: v })}
                   error={errors[`participants.${i}.ageGroup`]}
                   options={[
-                      { value: "anak", label: "Anak", hint: "0 – di bawah 12 tahun" },
+                      { value: "balita", label: "Balita", hint: "di bawah 5 tahun" },
+                      { value: "anak", label: "Anak", hint: "5 – di bawah 12 tahun" },
                       { value: "remaja", label: "Remaja", hint: "12 – di bawah 18 tahun" },
                       { value: "dewasa", label: "Dewasa", hint: "18 tahun ke atas" },
                     ]}
                   className="sm:col-span-2"
                 />
+                )}
               </div>
             </fieldset>
           ))}
@@ -419,7 +427,7 @@ function EditForm({
           <Callout tone="warning" icon={BanknotesIcon} className="mt-5">
             <p>
               Total pembayaran berubah dari {formatEuro(r.amountCents)} menjadi{" "}
-              <span className="font-semibold">{formatEuro(newAmount)}</span> ({rows.length} orang). Kode pembayaran dan batas
+              <span className="font-semibold">{formatEuro(newAmount)}</span> ({payingCount(rows)} orang berbayar). Kode pembayaran dan batas
               pembayaran tetap sama.
             </p>
             <p>Jika Anda sudah mentransfer jumlah lama, hubungi panitia sebelum mengubah jumlah peserta.</p>

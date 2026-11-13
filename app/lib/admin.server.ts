@@ -1,4 +1,4 @@
-import { localDateKey } from "./format";
+import { AGE_GROUPS, localDateKey } from "./format";
 import type { EventRow, RegistrationRow } from "./db.server";
 import { quotaSummary } from "./registration.server";
 
@@ -182,7 +182,7 @@ export async function dashboardStats(db: D1Database, event: EventRow, now = new 
     )
     .bind(event.id, nowIso)
     .all<{ age_group: string; is_member: number; n: number }>();
-  const ageGroups = (["anak", "remaja", "dewasa"] as const).map((g) => ({
+  const ageGroups = AGE_GROUPS.map((g) => ({
     group: g,
     member: ageRows.results.find((a) => a.age_group === g && a.is_member === 1)?.n ?? 0,
     nonMember: ageRows.results.find((a) => a.age_group === g && a.is_member === 0)?.n ?? 0,

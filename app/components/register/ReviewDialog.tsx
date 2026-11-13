@@ -9,7 +9,7 @@ import {
 
 import { Turnstile } from "~/components/Turnstile";
 import { Spinner, buttonClass } from "~/components/ui";
-import { formatEuro } from "~/lib/format";
+import { AGE_GROUP_SHORT, formatEuro, payingCount } from "~/lib/format";
 
 export interface ReviewSummary {
   registrantName: string;
@@ -20,7 +20,7 @@ export interface ReviewSummary {
   marketingOptIn: boolean;
 }
 
-const AGE_GROUP: Record<string, string> = { anak: "Anak", remaja: "Remaja", dewasa: "Dewasa" };
+const AGE_GROUP = AGE_GROUP_SHORT;
 const GENDER: Record<string, string> = { "laki-laki": "Laki-laki", perempuan: "Perempuan" };
 
 /**
@@ -54,6 +54,7 @@ export function ReviewDialog({
 
   const isMember = summary?.membership === "Ya";
   const count = summary?.participants.length ?? 0;
+  const payers = summary ? payingCount(summary.participants) : 0;
 
   return (
     <Dialog open={open} onClose={() => (submitting ? undefined : onClose())} className="relative z-50">
@@ -131,9 +132,9 @@ export function ReviewDialog({
                 ) : (
                   <p className="text-slate-600">
                     <span className="font-semibold text-slate-900">
-                      Total: {formatEuro(priceCents * count)}
+                      Total: {formatEuro(priceCents * payers)}
                     </span>{" "}
-                    ({count} × {formatEuro(priceCents)}). Instruksi pembayaran dikirim lewat email; bayar dalam{" "}
+                    ({payers} × {formatEuro(priceCents)}; balita dan anak gratis). Instruksi pembayaran dikirim lewat email; bayar dalam{" "}
                     <span className="font-semibold text-slate-900">{payWindowHours} jam</span> setelah mendaftar.
                   </p>
                 )}

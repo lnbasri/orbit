@@ -1,3 +1,4 @@
+import { payingCount } from "./format";
 import {
   SEATS_USED_SQL,
   getEventById,
@@ -99,7 +100,7 @@ export async function registerOnline(
   const isMember = input.membership === "Ya";
   const people = input.participants.length;
   const registrationId = newId();
-  const amountCents = isMember ? 0 : people * event.price_non_member_cents;
+  const amountCents = isMember ? 0 : payingCount(input.participants) * event.price_non_member_cents;
   const payDeadline = isMember
     ? null
     : new Date(now.getTime() + event.pay_window_min * 60_000).toISOString();

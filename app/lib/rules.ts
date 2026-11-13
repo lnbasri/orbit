@@ -4,7 +4,7 @@ import { formatEuro } from "./format";
 /** A rule is a list of text parts; `{ b }` parts are emphasised (bold). */
 export type RulePart = string | { b: string };
 
-export type RuleKey = "group" | "quota" | "closed" | "fee" | "qr" | "email" | "once" | "media";
+export type RuleKey = "group" | "quota" | "closed" | "fee" | "membership" | "qr" | "email" | "once" | "media";
 
 /** Bump when the documentation / live stream wording changes; stored with each acknowledgement. */
 export const MEDIA_NOTICE_VERSION = "2026-11-v1";
@@ -36,9 +36,19 @@ export function registrationRules(e: RuleEventInfo): RegistrationRule[] {
       parts: [
         "Anggota PPME Den Haag gratis. Non-anggota: ",
         { b: `${formatEuro(e.priceCents)} per orang` },
-        ", dibayar dalam ",
+        " untuk remaja dan dewasa (balita dan anak gratis), dibayar dalam ",
         { b: `${e.payWindowHours} jam` },
         " setelah mendaftar.",
+      ],
+    },
+    {
+      key: "membership",
+      parts: [
+        "Keanggotaan PPME Den Haag akan diverifikasi oleh panitia. ",
+        {
+          b: "Apabila keanggotaan tidak dapat dipastikan, panitia/pengurus PPME Den Haag berhak membatalkan pendaftaran.",
+        },
+        " Dalam hal ini Bapak/Ibu tetap dapat mendaftar kembali sebagai non-anggota selama kuota masih tersedia. Mohon pengertian Bapak/Ibu.",
       ],
     },
     { key: "qr", parts: ["QR Code dikirim lewat email setelah pendaftaran diterima atau pembayaran dikonfirmasi."] },

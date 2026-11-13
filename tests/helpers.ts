@@ -55,7 +55,7 @@ export function input(overrides: Partial<RegistrationInput> & { people?: number 
     participants: Array.from({ length: people }, (_, i) => ({
       name: i === 0 ? `Peserta Uji ${seq}` : `Anak ${i} Uji ${seq}`,
       gender: i % 2 ? "perempuan" : "laki-laki",
-      ageGroup: ["dewasa", "anak", "remaja"][i % 3],
+      ageGroup: ["dewasa", "remaja"][i % 2],
     })),
     consent: true,
     mediaConsent: true,

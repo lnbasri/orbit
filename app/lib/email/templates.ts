@@ -6,6 +6,7 @@ import {
   BRAND,
   FONT,
   bullets,
+  buttonLink,
   callout,
   codePanel,
   detailTable,
@@ -16,6 +17,9 @@ import {
 } from "./layout";
 
 export { escapeHtml };
+
+/** Voluntary infaq payment request (ING), shown as a button in the confirmation email. */
+const INFAQ_PAYMENT_URL = "https://www.ing.nl/payreq/m/?trxid=pGFVuaic76PdDsKuFNeHD4wkJ5edNwsY";
 
 export interface EventInfo {
   title: string;
@@ -184,6 +188,7 @@ export function confirmationEmail(
     para(
       "<em>“Jagalah diri kalian dari api neraka walaupun hanya dengan (bersedekah) separuh kurma.”</em> <strong>(HR. Bukhari dan Muslim)</strong>",
     ) +
+    buttonLink("Berikan Infaq", INFAQ_PAYMENT_URL) +
     para(
       "<strong>Infaq ini sepenuhnya sukarela, tidak wajib dan tidak menjadi syarat pendaftaran maupun keikutsertaan dalam kajian.</strong>",
     ) +
