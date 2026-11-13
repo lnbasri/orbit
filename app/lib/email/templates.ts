@@ -137,7 +137,7 @@ export function confirmationEmail(
     .map(
       (p, i) =>
         `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px 0;border:1px solid #E2E8F0;">` +
-        `<tr><td style="padding:18px 20px;font-family:${FONT};">` +
+        `<tr><td class="qr" style="padding:14px 16px;font-family:${FONT};">` +
         `<p style="margin:0 0 2px 0;font-size:11px;line-height:16px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:${BRAND};">Peserta ${i + 1}</p>` +
         `<p style="margin:0 0 4px 0;font-size:16px;line-height:24px;font-weight:700;color:#0F172A;">${escapeHtml(p.name)}</p>` +
         `<p style="margin:0 0 12px 0;font-size:13px;line-height:20px;color:#475569;">Kelompok usia: ${escapeHtml(p.ageGroup)} &middot; <strong style="color:#0F172A;">${escapeHtml(p.category)}</strong></p>` +

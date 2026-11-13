@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { getEventById } from "../app/lib/db.server";
-import { parseEuroToCents, updateEventDetails, updateEventPrice, updateQuotas, updateRegistrationWindow } from "../app/lib/events.server";
+import { parseEuroToCents, updateEventDetails, updateEventPrice, updateEventTimes, updateQuotas, updateRegistrationWindow } from "../app/lib/events.server";
 import { localInputToUtcIso, utcIsoToLocalInput } from "../app/lib/format";
 import { quotaSummary, registerOnline, registrationWindowError } from "../app/lib/registration.server";
 import { T0, input, resetDb, startDb } from "./helpers";
@@ -143,6 +143,25 @@ describe("admin: event price", () => {
   it("rejects invalid or zero price", async () => {
     expect((await updateEventPrice(db, "a@x.nl", 1, "0")).ok).toBe(false);
     expect((await updateEventPrice(db, "a@x.nl", 1, "x")).ok).toBe(false);
+  });
+});
+
+describe("admin: event times", () => {
+  it("saves new start and end (Netherlands time) and audits", async () => {
+    const r = await updateEventTimes(db, "admin@x.nl", 1, "2026-12-12T10:00", "2026-12-12T15:00");
+    expect(r.ok).toBe(true);
+    const ev = (await getEventById(db, 1))!;
+    expect([ev.starts_at, ev.ends_at]).toEqual(["2026-12-12T09:00:00.000Z", "2026-12-12T14:00:00.000Z"]);
+    expect(await db.prepare("SELECT 1 FROM audit_log WHERE action = 'event.times'").first()).toBeTruthy();
+  });
+
+  it("rejects empty, invalid, reversed times and a start before the registration close", async () => {
+    expect((await updateEventTimes(db, "a@x.nl", 1, "", "2026-12-12T15:00")).ok).toBe(false);
+    expect((await updateEventTimes(db, "a@x.nl", 1, "2026-12-12T10:00", "nope")).ok).toBe(false);
+    expect((await updateEventTimes(db, "a@x.nl", 1, "2026-12-12T15:00", "2026-12-12T10:00")).ok).toBe(false);
+    await db.prepare("UPDATE events SET registration_closes_at = '2026-12-03T22:00:00.000Z' WHERE id = 1").run();
+    const early = await updateEventTimes(db, "a@x.nl", 1, "2026-12-01T10:00", "2026-12-01T15:00");
+    expect(early.ok).toBe(false);
   });
 });
 

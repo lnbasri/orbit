@@ -49,6 +49,52 @@ export async function updateRegistrationWindow(
   return { ok: true, message: "Jadwal pendaftaran disimpan." };
 }
 
+/**
+ * Admin: set when the event actually starts and ends (inputs are Netherlands wall-clock time, stored as UTC).
+ * Registration always ends at the start, so the start may not move before the registration opening/closing time;
+ * move those first. Affects what is shown from now on (form, new emails), nothing is re-sent.
+ */
+export async function updateEventTimes(
+  db: D1Database,
+  actor: string,
+  eventId: number,
+  startsLocal: string,
+  endsLocal: string,
+  now = new Date(),
+): Promise<EventResult> {
+  const event = await getEventById(db, eventId);
+  if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+
+  const starts = startsLocal.trim() ? localInputToUtcIso(startsLocal) : null;
+  const ends = endsLocal.trim() ? localInputToUtcIso(endsLocal) : null;
+  if (!starts) return { ok: false, message: "Waktu mulai acara wajib diisi dengan format yang valid." };
+  if (!ends) return { ok: false, message: "Waktu selesai acara wajib diisi dengan format yang valid." };
+  if (ends <= starts) return { ok: false, message: "Waktu selesai harus setelah waktu mulai." };
+  if (event.registration_opens_at && event.registration_opens_at >= starts) {
+    return { ok: false, message: "Waktu mulai acara harus setelah pendaftaran dibuka. Ubah jadwal pendaftaran lebih dulu." };
+  }
+  if (event.registration_closes_at && event.registration_closes_at > starts) {
+    return {
+      ok: false,
+      message: "Waktu mulai acara tidak boleh sebelum batas pendaftaran. Ubah batas pendaftaran lebih dulu.",
+    };
+  }
+  if (starts === event.starts_at && ends === event.ends_at) return { ok: true, message: "Waktu acara tidak berubah." };
+
+  await db.batch([
+    db.prepare("UPDATE events SET starts_at = ?, ends_at = ? WHERE id = ?").bind(starts, ends, eventId),
+    auditStatement(
+      db,
+      actor,
+      "event.times",
+      event.slug,
+      { from: [event.starts_at, event.ends_at], to: [starts, ends] },
+      now.toISOString(),
+    ),
+  ]);
+  return { ok: true, message: "Waktu acara disimpan." };
+}
+
 /** Parse "10", "10,50" or "10.50" (euros) into cents; null if not a valid amount. */
 export function parseEuroToCents(v: string): number | null {
   const s = v.trim().replace(/^€\s*/, "").replace(",", ".");

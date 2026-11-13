@@ -41,6 +41,8 @@ export async function loader() {
     speaker: event.speaker ?? "",
     theme: event.theme ?? "",
     startsAt: event.starts_at,
+    startsAtLocal: utcIsoToLocalInput(event.starts_at),
+    endsAtLocal: utcIsoToLocalInput(event.ends_at),
     opensAt: utcIsoToLocalInput(event.registration_opens_at),
     closesAt: utcIsoToLocalInput(event.registration_closes_at),
     closesAtUtc: event.registration_closes_at,
@@ -55,8 +57,10 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { title, speaker, theme, startsAt, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota } = loaderData;
+  const { title, speaker, theme, startsAt, startsAtLocal, endsAtLocal, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota } = loaderData;
   const fetcher = useFetcher<{ ok: boolean; message: string }>();
+  const timesFetcher = useFetcher<{ ok: boolean; message: string }>();
+  const timesBusy = timesFetcher.state !== "idle";
   const detailsFetcher = useFetcher<{ ok: boolean; message: string }>();
   const detailsBusy = detailsFetcher.state !== "idle";
   const priceFetcher = useFetcher<{ ok: boolean; message: string }>();
@@ -75,7 +79,36 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
     <div>
       <PageHeader eyebrow="Pengaturan" title="Pengaturan acara" description={title} />
 
-      <Panel title="Jadwal pendaftaran online" icon={CalendarDaysIcon}>
+      <Panel title="Waktu acara" icon={ClockIcon}>
+        <timesFetcher.Form method="post" className="grid gap-4 sm:grid-cols-2">
+          <input type="hidden" name="intent" value="save-event-times" />
+          <TextField name="startsAt" type="datetime-local" label="Acara dimulai" defaultValue={startsAtLocal} />
+          <TextField name="endsAt" type="datetime-local" label="Acara selesai" defaultValue={endsAtLocal} />
+          <div className="sm:col-span-2">
+            <button type="submit" disabled={timesBusy} className={buttonClass("primary", "md", "w-full sm:w-auto")}>
+              {timesBusy ? <Spinner /> : <CheckCircleIcon className="size-4" aria-hidden="true" />}
+              {timesBusy ? "Menyimpan…" : "Simpan waktu acara"}
+            </button>
+            <button type="reset" disabled={timesBusy} className={buttonClass("secondary", "md", "mt-2 w-full sm:mt-0 sm:ml-2 sm:w-auto")}>
+              <ArrowUturnLeftIcon className="size-4" aria-hidden="true" />
+              Reset
+            </button>
+          </div>
+        </timesFetcher.Form>
+        <Notice result={timesFetcher.data} className="mt-4" />
+        <ul className="mt-6 space-y-2 border-t border-slate-100 pt-5 text-xs text-slate-500">
+          <Hint icon={ClockIcon}>Waktu dalam zona waktu Belanda (Europe/Amsterdam).</Hint>
+          <Hint icon={CalendarDaysIcon}>
+            Pendaftaran selalu berakhir saat acara dimulai, jadi batas pendaftaran tidak boleh melewati waktu mulai. Untuk
+            memajukan acara, ubah dulu batas pendaftaran.
+          </Hint>
+          <Hint icon={InformationCircleIcon}>
+            Tampil di formulir publik dan di email yang dikirim sesudahnya. Email yang sudah terkirim tidak berubah.
+          </Hint>
+        </ul>
+      </Panel>
+
+      <Panel title="Jadwal pendaftaran online" icon={CalendarDaysIcon} className="mt-6">
         <Callout tone={state ? "warning" : "success"} icon={state ? LockClosedIcon : LockOpenIcon} className="mb-6">
           <p>
             <span className="font-semibold">{state ? `Saat ini: ${state}` : "Saat ini pendaftaran dibuka."}</span>
