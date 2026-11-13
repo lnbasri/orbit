@@ -1,0 +1,84 @@
+name: Test and deploy
+
+# On every push/merge to main: typecheck + tests, then apply D1 migrations and deploy the public
+# Worker and the admin Worker. Both Workers run the same bundle and share one D1 database, so they
+# are always deployed together (migrations first, then public, then admin).
+#
+# Target environment pair, chosen by the repository variable DEPLOY_TARGET (Settings > Variables > Actions):
+#   test        -> envs `test` + `test-admin`                 (default; workers.dev)
+#   production  -> envs `production` + `production-admin`     (event.ppmedenhaag.nl / event-admin.ppmedenhaag.nl)
+# Run it by hand from the Actions tab to pick a target explicitly.
+#
+# Required repository secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID.
+# App secrets (RESEND_API_KEY, TURNSTILE_SECRET, ADMIN_EMAILS, ...) live on the Workers, not here.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - ".vscode/**"
+      - ".agents/**"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Environment pair to deploy"
+        type: choice
+        options: [test, production]
+        default: test
+
+# One deploy at a time; a newer push waits instead of cancelling a deploy halfway.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET: ${{ inputs.target || vars.DEPLOY_TARGET || 'test' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Check target and credentials
+        run: |
+          case "$TARGET" in test|production) ;; *) echo "DEPLOY_TARGET must be 'test' or 'production', got '$TARGET'"; exit 1 ;; esac
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Set the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets."; exit 1
+          fi
+          echo "Deploying target: $TARGET and $TARGET-admin"
+
+      # Idempotent: only applies migrations not yet recorded. Both Workers of a target share this one database.
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply DB --remote --env "$TARGET"
+
+      - name: Deploy public Worker
+        run: node scripts/deploy.mjs "$TARGET"
+
+      - name: Deploy admin Worker
+        run: node scripts/deploy.mjs "$TARGET-admin"
