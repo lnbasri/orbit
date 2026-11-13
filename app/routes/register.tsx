@@ -6,7 +6,10 @@ import type { Route } from "./+types/register";
 import { HeaderSection } from "~/components/register/HeaderSection";
 import { RegistrationForm } from "~/components/register/RegistrationForm";
 import { SuccessPanel } from "~/components/register/SuccessPanel";
-import { Backdrop, Callout } from "~/components/ui";
+import { PageShell } from "~/components/register/PageShell";
+import { Callout, buttonClass } from "~/components/ui";
+import { Link } from "react-router";
+import { PencilSquareIcon } from "@heroicons/react/24/outline";
 import { bankConfigured, bankInfo, emailConfig, featureEnabled, isDev } from "~/lib/config.server";
 import { getAppEnv } from "~/lib/env.server";
 import { getEventBySlug } from "~/lib/db.server";
@@ -53,7 +56,7 @@ export async function loader({ params }: Route.LoaderArgs) {
 }
 
 type ActionData =
-  | { ok: false; errors: FieldErrors; message: string }
+  | { ok: false; errors: FieldErrors; message: string; manageLink?: boolean }
   | { ok: true; kind: "accepted"; people: number; email: string }
   | {
       ok: true;
@@ -91,7 +94,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
   }
 
-  const parsed = registrationSchema(event.max_family, new Date().getFullYear()).safeParse(
+  const parsed = registrationSchema(event.max_family).safeParse(
     formToRegistrationDraft(form),
   );
   if (!parsed.success) {
@@ -147,7 +150,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           ok: false,
           errors: { email: "Email ini sudah memiliki pendaftaran aktif." },
           message:
-            "Email ini sudah memiliki pendaftaran aktif untuk acara ini. Periksa kotak masuk Anda atau hubungi panitia.",
+            "Email ini sudah memiliki pendaftaran aktif untuk acara ini. Buka \"Pendaftaran Saya\" untuk melihat atau mengubahnya, atau periksa kotak masuk Anda.",
+          manageLink: true,
         },
         { status: 409 },
       );
@@ -165,7 +169,7 @@ export default function Register({ loaderData, actionData }: Route.ComponentProp
   if (result?.ok) {
     return (
       <PageShell>
-        <SuccessPanel result={result} eventTitle={event.title} />
+        <SuccessPanel result={result} eventTitle={event.title} manageUrl={`/e/${event.slug}/pendaftaran-saya`} />
       </PageShell>
     );
   }
@@ -173,6 +177,7 @@ export default function Register({ loaderData, actionData }: Route.ComponentProp
   return (
     <PageShell>
       <HeaderSection event={event} />
+      <ManageLinkBar slug={event.slug} />
 
       {devNotice ? (
         <div className="px-5 pb-6 sm:px-8 lg:px-10">
@@ -201,25 +206,15 @@ export default function Register({ loaderData, actionData }: Route.ComponentProp
   );
 }
 
-/** Edge-to-edge sheet on phones; a thin-bordered glass column with a brand top rule from sm upwards. */
-function PageShell({ children }: { children: React.ReactNode }) {
+/** For people who already registered: view or change the registration (email code). */
+function ManageLinkBar({ slug }: { slug: string }) {
   return (
-    <Backdrop>
-      <main className="mx-auto max-w-6xl sm:px-6 sm:py-10 lg:py-14">
-        <article className="relative overflow-hidden border-b border-slate-200/80 bg-white/80 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_24px_48px_-28px_rgb(15_23_42/0.18)] backdrop-blur-md sm:border">
-          <div className="h-1 bg-gradient-to-r from-brand via-brand to-brand-dark" aria-hidden="true" />
-          {children}
-        </article>
-        <footer className="flex flex-col gap-1 px-5 py-6 text-[13px] text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-0">
-          <p>
-            Panitia Kajian{" "}
-            <a className="font-semibold text-brand hover:text-brand-dark" href="https://www.ppmedenhaag.nl/">
-              PPME Den Haag
-            </a>
-          </p>
-          <p>Semua waktu dalam waktu Belanda (Europe/Amsterdam).</p>
-        </footer>
-      </main>
-    </Backdrop>
+    <div className="flex flex-col gap-3 border-t border-slate-200/80 bg-slate-50/70 px-5 py-4 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10">
+      <p>Sudah mendaftar? Lihat atau ubah data pendaftaran Anda.</p>
+      <Link to={`/e/${slug}/pendaftaran-saya`} className={buttonClass("secondary", "sm", "self-start sm:self-auto")}>
+        <PencilSquareIcon className="size-4" aria-hidden="true" />
+        Pendaftaran Saya
+      </Link>
+    </div>
   );
 }

@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { getEventById } from "../app/lib/db.server";
-import { updateRegistrationWindow } from "../app/lib/events.server";
+import { parseEuroToCents, updateEventPrice, updateQuotas, updateRegistrationWindow } from "../app/lib/events.server";
 import { localInputToUtcIso, utcIsoToLocalInput } from "../app/lib/format";
 import { quotaSummary, registerOnline, registrationWindowError } from "../app/lib/registration.server";
-import { input, resetDb, startDb } from "./helpers";
+import { T0, input, resetDb, startDb } from "./helpers";
 
 describe("Netherlands wall-clock <-> UTC", () => {
   it("winter time (CET, UTC+1)", () => {
@@ -111,5 +111,50 @@ describe("quota-full closing", () => {
     await registerOnline(db, e, input(), { now: at("2026-11-20T10:00:00.000Z"), ignoreWindow: true });
     const q = await quotaSummary(db, e, at("2026-11-20T10:01:00.000Z"));
     expect([q.member.remaining, q.nonMember.remaining]).toEqual([0, 5]);
+  });
+});
+
+describe("admin: event price", () => {
+  it("parses euro input", () => {
+    expect(parseEuroToCents("10")).toBe(1000);
+    expect(parseEuroToCents("12,50")).toBe(1250);
+    expect(parseEuroToCents("€ 7.5")).toBe(750);
+    expect(parseEuroToCents("abc")).toBeNull();
+    expect(parseEuroToCents("-1")).toBeNull();
+  });
+
+  it("only affects new registrations; old ones keep their amount", async () => {
+    const reg = (email: string) => async () => {
+      const ev = (await getEventById(db, 1))!;
+      return registerOnline(db, ev, input({ people: 2, email, membership: "Tidak" }), { now: T0, ignoreWindow: true });
+    };
+    const before = await reg("a@x.nl")();
+    expect(before.kind).toBe("pending_payment");
+    const oldAmount = before.kind === "pending_payment" ? before.amountCents : 0;
+    expect((await updateEventPrice(db, "admin@x.nl", 1, "15")).ok).toBe(true);
+    expect((await getEventById(db, 1))!.price_non_member_cents).toBe(1500);
+    const after = await reg("b@x.nl")();
+    expect(after.kind === "pending_payment" && after.amountCents).toBe(3000);
+    const first = await db.prepare("SELECT amount_cents FROM registrations WHERE lower(email) = 'a@x.nl'").first<{ amount_cents: number }>();
+    expect(first!.amount_cents).toBe(oldAmount);
+    expect(await db.prepare("SELECT 1 FROM audit_log WHERE action = 'event.price'").first()).toBeTruthy();
+  });
+
+  it("rejects invalid or zero price", async () => {
+    expect((await updateEventPrice(db, "a@x.nl", 1, "0")).ok).toBe(false);
+    expect((await updateEventPrice(db, "a@x.nl", 1, "x")).ok).toBe(false);
+  });
+});
+
+describe("admin: quotas", () => {
+  it("can raise/lower but never below seats in use", async () => {
+    const ev = (await getEventById(db, 1))!;
+    await registerOnline(db, ev, input({ people: 3, membership: "Ya" }), { now: T0, ignoreWindow: true });
+    expect((await updateQuotas(db, "a@x.nl", 1, "2", "50", T0)).ok).toBe(false);
+    expect((await updateQuotas(db, "a@x.nl", 1, "3", "50", T0)).ok).toBe(true);
+    const e = (await getEventById(db, 1))!;
+    expect([e.quota_member, e.quota_non_member]).toEqual([3, 50]);
+    expect((await updateQuotas(db, "a@x.nl", 1, "x", "5", T0)).ok).toBe(false);
+    expect(await db.prepare("SELECT 1 FROM audit_log WHERE action = 'event.quota'").first()).toBeTruthy();
   });
 });

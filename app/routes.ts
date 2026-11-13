@@ -3,6 +3,7 @@ import { type RouteConfig, index, layout, prefix, route } from "@react-router/de
 export default [
   index("routes/home.tsx"),
   route("e/:slug", "routes/register.tsx"),
+  route("e/:slug/pendaftaran-saya", "routes/my-registration.tsx"),
 
   ...prefix("admin", [
     // Login/logout and the Google callback sit outside the protected layout.

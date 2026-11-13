@@ -35,7 +35,7 @@ export function normalizeCode(raw: string): string | null {
   return /^\d{6}$/.test(digits) ? digits : null;
 }
 
-const hashCode = (salt: string, code: string) => sha256Hex(`${salt}:${code}`);
+export const hashCode = (salt: string, code: string) => sha256Hex(`${salt}:${code}`);
 
 export type RequestCodeResult =
   | { status: "sent"; codeId: number }

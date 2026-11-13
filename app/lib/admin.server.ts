@@ -1,3 +1,4 @@
+import { localDateKey } from "./format";
 import type { EventRow, RegistrationRow } from "./db.server";
 import { quotaSummary } from "./registration.server";
 
@@ -91,6 +92,28 @@ export async function listRegistrations(db: D1Database, event: EventRow, f: Regi
   return { rows: results, total: count?.n ?? 0, page, pageSize: PAGE_SIZE };
 }
 
+/** One point per Netherlands calendar day from the first registration to today (gaps filled with zeros). */
+export function buildTimeline(rows: { created_at: string; is_member: number; people: number }[], now: Date) {
+  if (rows.length === 0) return [] as { date: string; member: number; nonMember: number }[];
+  const byDay = new Map<string, { member: number; nonMember: number }>();
+  for (const r of rows) {
+    const k = localDateKey(r.created_at);
+    const d = byDay.get(k) ?? { member: 0, nonMember: 0 };
+    if (r.is_member) d.member += r.people;
+    else d.nonMember += r.people;
+    byDay.set(k, d);
+  }
+  const first = localDateKey(rows[0].created_at);
+  const last = localDateKey(now);
+  const out: { date: string; member: number; nonMember: number }[] = [];
+  for (let t = Date.parse(first + "T12:00:00Z"); out.length < 400; t += 86_400_000) {
+    const k = new Date(t).toISOString().slice(0, 10);
+    if (k > last && out.length > 0) break;
+    out.push({ date: k, ...(byDay.get(k) ?? { member: 0, nonMember: 0 }) });
+  }
+  return out;
+}
+
 export async function dashboardStats(db: D1Database, event: EventRow, now = new Date()) {
   const nowIso = now.toISOString();
   const byStatus = await db
@@ -140,6 +163,31 @@ export async function dashboardStats(db: D1Database, event: EventRow, now = new 
     .bind(event.id, ...unsent.binds)
     .first<{ n: number }>();
 
+  // Daily registrations (people) per group, Netherlands calendar days, active registrations only.
+  const regRows = await db
+    .prepare(
+      `SELECT r.created_at, r.is_member, r.people FROM registrations r
+       WHERE r.event_id = ? AND (r.status = 'accepted' OR (r.status = 'pending_payment' AND r.pay_deadline > ?))
+       ORDER BY r.created_at`,
+    )
+    .bind(event.id, nowIso)
+    .all<{ created_at: string; is_member: number; people: number }>();
+  const timeline = buildTimeline(regRows.results, now);
+
+  const ageRows = await db
+    .prepare(
+      `SELECT p.age_group, r.is_member, COUNT(*) AS n FROM participants p JOIN registrations r ON r.id = p.registration_id
+       WHERE r.event_id = ? AND (r.status = 'accepted' OR (r.status = 'pending_payment' AND r.pay_deadline > ?))
+       GROUP BY p.age_group, r.is_member`,
+    )
+    .bind(event.id, nowIso)
+    .all<{ age_group: string; is_member: number; n: number }>();
+  const ageGroups = (["anak", "remaja", "dewasa"] as const).map((g) => ({
+    group: g,
+    member: ageRows.results.find((a) => a.age_group === g && a.is_member === 1)?.n ?? 0,
+    nonMember: ageRows.results.find((a) => a.age_group === g && a.is_member === 0)?.n ?? 0,
+  }));
+
   const statuses: Record<string, { families: number; people: number }> = {};
   for (const s of byStatus.results) statuses[s.status] = { families: s.families, people: s.people ?? 0 };
 
@@ -148,6 +196,8 @@ export async function dashboardStats(db: D1Database, event: EventRow, now = new 
     bySource: Object.fromEntries(bySource.results.map((s) => [s.source, s.people ?? 0])) as Record<string, number>,
     checkin: { accepted: checkin?.accepted ?? 0, checkedIn: checkin?.checked_in ?? 0 },
     quota: await quotaSummary(db, event, now),
+    timeline,
+    ageGroups,
     pendingPayments: pending.results,
     unverifiedMembers: unverified?.n ?? 0,
     unsentEmails: unsentRow?.n ?? 0,
@@ -181,7 +231,7 @@ export async function exportRows(db: D1Database, event: EventRow, f: Registratio
          r.source, ${EFFECTIVE_STATUS_SQL} AS registration_status, r.payment_status, r.payment_code,
          r.amount_cents, r.pay_deadline, r.paid_at, r.confirmed_by,
          r.membership_verified_at, r.membership_verified_by,
-         p.id AS participant_id, p.position, p.full_name, p.birth_year, p.gender,
+         p.id AS participant_id, p.position, p.full_name, p.age_group, p.gender,
          p.status AS participant_status, p.qr_token AS ticket_code, p.checked_in_at
        FROM registrations r JOIN participants p ON p.registration_id = r.id
        WHERE ${sql}

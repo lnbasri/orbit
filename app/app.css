@@ -52,7 +52,7 @@ body {
   }
 }
 
-/* Number inputs: no spinner arrows (birth year is typed). */
+/* Number inputs: no spinner arrows (number inputs are typed). */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;

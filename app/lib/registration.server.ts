@@ -153,7 +153,7 @@ export async function registerOnline(
     statements.push(
       db
         .prepare(
-          `INSERT INTO participants (id, registration_id, position, full_name, birth_year, gender, status, qr_token)
+          `INSERT INTO participants (id, registration_id, position, full_name, age_group, gender, status, qr_token)
            SELECT ?, ?, ?, ?, ?, ?, ?, ?
            WHERE EXISTS (SELECT 1 FROM registrations WHERE id = ?)`,
         )
@@ -162,7 +162,7 @@ export async function registerOnline(
           registrationId,
           index + 1,
           p.name,
-          p.birthYear,
+          p.ageGroup,
           p.gender,
           isMember ? "accepted" : "pending_payment",
           isMember ? newTicketToken() : null,
@@ -239,10 +239,10 @@ export async function registerOnline(
     ...input.participants.map((p, index) =>
       db
         .prepare(
-          `INSERT INTO participants (id, registration_id, position, full_name, birth_year, gender, status)
+          `INSERT INTO participants (id, registration_id, position, full_name, age_group, gender, status)
            VALUES (?, ?, ?, ?, ?, ?, 'rejected')`,
         )
-        .bind(newId(), registrationId, index + 1, p.name, p.birthYear, p.gender),
+        .bind(newId(), registrationId, index + 1, p.name, p.ageGroup, p.gender),
     ),
   ];
   await db.batch(rejected);

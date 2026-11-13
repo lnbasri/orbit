@@ -1,8 +1,11 @@
+import { AGE_GROUP_SHORT } from "../format";
 import { getEventById, getParticipants, getRegistration } from "../db.server";
 import { bytesToBase64 } from "../png";
 import { qrPng } from "../qr";
+import { selfEditState } from "../self-service.server";
 import {
   confirmationEmail,
+  type ManageInfo,
   expiredEmail,
   paymentInstructionsEmail,
   reminderEmail,
@@ -17,6 +20,8 @@ export interface EmailConfig {
   replyTo: string;
   resendApiKey?: string;
   bank: BankInfo;
+  /** Public origin for links in emails ("Pendaftaran saya"); links are left out when unset. */
+  publicUrl?: string;
 }
 
 export interface Attachment {
@@ -37,12 +42,23 @@ export interface OutgoingEmail {
 
 export const MAX_EMAIL_ATTEMPTS = 5;
 
-async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: string, kind: EmailKind) {
+async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: string, kind: EmailKind, now = new Date()) {
   const reg = await getRegistration(db, registrationId);
   if (!reg) throw new Error("Pendaftaran tidak ditemukan.");
   if (!reg.email) throw new Error("Pendaftaran tidak memiliki alamat email.");
   const event = await getEventById(db, reg.event_id);
   if (!event) throw new Error("Acara tidak ditemukan.");
+  const state = selfEditState(reg, event, now);
+  const manage: ManageInfo = {
+    url: cfg.publicUrl ? `${cfg.publicUrl}/e/${event.slug}/pendaftaran-saya` : null,
+    editable: state.editable,
+    until: state.editable ? state.until : null,
+    paid: !state.editable && state.reason === "paid",
+    contact: cfg.replyTo,
+    // Shown when the email went out because of a self-service edit (edits always happen before a payment).
+    updated: !!reg.updated_at && (!reg.paid_at || reg.updated_at > reg.paid_at),
+  };
+  const rev = reg.edit_rev;
 
   if (kind === "confirmation") {
     if (reg.status !== "accepted") throw new Error("Pendaftaran ini belum diterima.");
@@ -66,12 +82,13 @@ async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: stri
       registrantName: reg.registrant_name,
       participants: participants.map((p, i) => ({
         name: p.full_name,
-        birthYear: p.birth_year,
+        ageGroup: AGE_GROUP_SHORT[p.age_group] ?? p.age_group,
         category,
         cid: `qr${i + 1}`,
       })),
+      manage,
     });
-    return { to: reg.email, subject, html, attachments };
+    return { to: reg.email, subject, html, attachments, rev };
   }
 
   if (!reg.payment_code || !reg.pay_deadline) throw new Error("Pendaftaran ini tidak memiliki data pembayaran.");
@@ -85,8 +102,9 @@ async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: stri
       paymentCode: reg.payment_code,
       payDeadline: reg.pay_deadline,
       bank: cfg.bank,
+      manage,
     });
-    return { to: reg.email, subject, html, attachments: [] };
+    return { to: reg.email, subject, html, attachments: [], rev };
   }
   if (kind === "reminder") {
     const { subject, html } = reminderEmail({
@@ -96,15 +114,16 @@ async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: stri
       paymentCode: reg.payment_code,
       payDeadline: reg.pay_deadline,
       bank: cfg.bank,
+      manage,
     });
-    return { to: reg.email, subject, html, attachments: [] };
+    return { to: reg.email, subject, html, attachments: [], rev };
   }
   const { subject, html } = expiredEmail({
     event,
     registrantName: reg.registrant_name,
     paymentCode: reg.payment_code,
   });
-  return { to: reg.email, subject, html, attachments: [] };
+  return { to: reg.email, subject, html, attachments: [], rev };
 }
 
 async function transport(
@@ -225,11 +244,13 @@ export async function deliverEmail(
   if ((claim.meta.changes ?? 0) === 0) return { ok: true, skipped: true };
 
   try {
-    const msg = await buildEmail(db, cfg, registrationId, kind);
+    const { rev, ...msg } = await buildEmail(db, cfg, registrationId, kind, now);
+    // The edit revision is part of the key: after a self-service edit the re-queued email has new content and must not
+    // be de-duplicated by the provider against the original send (never edited = "v1", as before).
     const providerId = await transport(db, cfg, msg, {
       registrationId,
       kind,
-      idempotencyKey: `${registrationId}:${kind}:${opts.force ? nowIso : "v1"}`,
+      idempotencyKey: `${registrationId}:${kind}:${opts.force ? nowIso : (rev ?? "v1")}`,
     });
     await db
       .prepare(

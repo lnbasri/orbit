@@ -12,9 +12,11 @@ import { countryName, describeDevice } from "../app/lib/email/login-code";
 import { googleConfig } from "../app/lib/google-oauth.server";
 import { generateCode, normalizeCode } from "../app/lib/login-codes.server";
 import { bankConfigured, featureEnabled } from "../app/lib/config.server";
+import { buildTimeline } from "../app/lib/admin.server";
+import { daysUntil, exportRowsToIndonesian } from "../app/lib/format";
 import { toCsv } from "../app/lib/csv";
 import { verifyTurnstile } from "../app/lib/turnstile.server";
-import { formToRegistrationDraft, normalizeWhatsapp, registrationSchema } from "../app/lib/validation";
+import { formToRegistrationDraft, normalizeWhatsapp, registrationSchema, validateRegistrationDraft } from "../app/lib/validation";
 
 describe("validation", () => {
   it("normalises WhatsApp numbers", () => {
@@ -32,11 +34,11 @@ describe("validation", () => {
       whatsapp: "0612345678",
       participantCount: "2",
       p0_name: "Budi",
-      p0_gender: "male",
-      p0_birthYear: "1980",
+      p0_gender: "laki-laki",
+      p0_ageGroup: "dewasa",
       p1_name: "Ani",
-      p1_gender: "female",
-      p1_birthYear: "2015",
+      p1_gender: "perempuan",
+      p1_ageGroup: "anak",
       consent: "on",
       ...extra,
     };
@@ -45,24 +47,24 @@ describe("validation", () => {
   }
 
   it("accepts a valid family and normalises fields", () => {
-    const r = registrationSchema(8, 2026).safeParse(formToRegistrationDraft(form()));
+    const r = registrationSchema(8).safeParse(formToRegistrationDraft(form()));
     expect(r.success).toBe(true);
     if (!r.success) return;
     expect(r.data).toMatchObject({ registrantName: "Budi", email: "budi@example.com", whatsapp: "+31612345678" });
-    expect(r.data.participants[1]).toEqual({ name: "Ani", gender: "female", birthYear: 2015 });
+    expect(r.data.participants[1]).toEqual({ name: "Ani", gender: "perempuan", ageGroup: "anak" });
   });
 
-  it("requires privacy consent, valid gender and birth year", () => {
-    const f = form({ p1_gender: "x", p1_birthYear: "2030" });
+  it("requires privacy consent, valid gender and age group", () => {
+    const f = form({ p1_gender: "x", p1_ageGroup: "balita" });
     f.delete("consent");
-    const r = registrationSchema(8, 2026).safeParse(formToRegistrationDraft(f));
+    const r = registrationSchema(8).safeParse(formToRegistrationDraft(f));
     expect(r.success).toBe(false);
     const paths = r.error!.issues.map((i) => i.path.join("."));
-    expect(paths).toEqual(expect.arrayContaining(["consent", "participants.1.gender", "participants.1.birthYear"]));
+    expect(paths).toEqual(expect.arrayContaining(["consent", "participants.1.gender", "participants.1.ageGroup"]));
   });
 
   it("enforces the maximum family size", () => {
-    const r = registrationSchema(1, 2026).safeParse(formToRegistrationDraft(form()));
+    const r = registrationSchema(1).safeParse(formToRegistrationDraft(form()));
     expect(r.success).toBe(false);
   });
 });
@@ -207,5 +209,85 @@ describe("feature switches (public form / admin)", () => {
     const adminOnly = { ENABLE_PUBLIC: "false" };
     expect([featureEnabled(publicOnly, "public"), featureEnabled(publicOnly, "admin")]).toEqual([true, false]);
     expect([featureEnabled(adminOnly, "public"), featureEnabled(adminOnly, "admin")]).toEqual([false, true]);
+  });
+});
+
+describe("front-end validation messages", () => {
+  const ok = {
+    registrantName: "Budi",
+    membership: "Ya",
+    email: "budi@example.com",
+    whatsapp: "+31612345678",
+    participants: [{ name: "Budi", gender: "laki-laki", ageGroup: "dewasa" }],
+    consent: true,
+    marketingOptIn: false,
+    idempotencyKey: undefined,
+  };
+
+  it("accepts a valid draft", () => {
+    expect(validateRegistrationDraft(ok, 8)).toEqual({});
+  });
+
+  it("gives Indonesian messages for empty and malformed fields", () => {
+    const errors = validateRegistrationDraft(
+      { ...ok, registrantName: " ", membership: "", email: "x", whatsapp: "", consent: false,
+        participants: [{ name: "", gender: "", ageGroup: "" }] },
+      8,
+    );
+    expect(errors).toMatchObject({
+      registrantName: "Nama pendaftar wajib diisi.",
+      membership: "Pilih status keanggotaan.",
+      email: "Format email tidak valid. Contoh: nama@email.com.",
+      whatsapp: "Nomor WhatsApp wajib diisi.",
+      consent: "Persetujuan privasi wajib dicentang.",
+      "participants.0.name": "Nama peserta wajib diisi.",
+      "participants.0.gender": "Jenis kelamin wajib dipilih.",
+      "participants.0.ageGroup": "Kelompok usia wajib dipilih.",
+    });
+  });
+});
+
+describe("CSV export in Indonesian", () => {
+  it("translates codes, times and amounts", () => {
+    const { rows, columns } = exportRowsToIndonesian([
+      { registration_id: "r1", created_at: "2026-11-11T22:14:00.000Z", category: "member", source: "online",
+        registration_status: "accepted", payment_status: "free", amount_cents: 1250, gender: "perempuan",
+        participant_status: "accepted", age_group: "anak" },
+    ]);
+    expect(columns[0]).toBe("ID Pendaftaran");
+    expect(rows[0]).toMatchObject({
+      "Waktu Daftar": "11-11-2026 23:14", Keanggotaan: "anggota", "Status Pendaftaran": "diterima",
+      "Status Pembayaran": "gratis", "Jumlah (€)": "12,50", "Jenis Kelamin": "perempuan", "Status Peserta": "diterima",
+    });
+    expect(exportRowsToIndonesian([]).columns.length).toBe(columns.length);
+  });
+});
+
+describe("dashboard chart data", () => {
+  it("daysUntil counts Netherlands calendar days", () => {
+    const start = "2026-12-05T08:00:00.000Z";
+    expect(daysUntil(start, new Date("2026-11-13T10:00:00.000Z"))).toBe(22);
+    expect(daysUntil(start, new Date("2026-12-05T06:00:00.000Z"))).toBe(0);
+    expect(daysUntil(start, new Date("2026-12-06T10:00:00.000Z"))).toBe(-1);
+    // 23:30 UTC on 4 Dec is already 5 Dec in the Netherlands
+    expect(daysUntil(start, new Date("2026-12-04T23:30:00.000Z"))).toBe(0);
+  });
+
+  it("buildTimeline groups people per local day and fills gaps up to today", () => {
+    const t = buildTimeline(
+      [
+        { created_at: "2026-11-10T10:00:00.000Z", is_member: 1, people: 2 },
+        { created_at: "2026-11-10T23:30:00.000Z", is_member: 0, people: 3 }, // 11 Nov in the Netherlands
+        { created_at: "2026-11-12T09:00:00.000Z", is_member: 0, people: 1 },
+      ],
+      new Date("2026-11-13T10:00:00.000Z"),
+    );
+    expect(t).toEqual([
+      { date: "2026-11-10", member: 2, nonMember: 0 },
+      { date: "2026-11-11", member: 0, nonMember: 3 },
+      { date: "2026-11-12", member: 0, nonMember: 1 },
+      { date: "2026-11-13", member: 0, nonMember: 0 },
+    ]);
+    expect(buildTimeline([], new Date())).toEqual([]);
   });
 });

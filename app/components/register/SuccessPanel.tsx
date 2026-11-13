@@ -5,11 +5,14 @@ import {
   ClockIcon,
   EnvelopeIcon,
   HashtagIcon,
+  PencilSquareIcon,
   QrCodeIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
 
-import { Callout, Eyebrow, Logo } from "~/components/ui";
+import { Link } from "react-router";
+
+import { Callout, Eyebrow, Logo, buttonClass } from "~/components/ui";
 import { formatDateTime, formatEuro } from "~/lib/format";
 import { EventDetailRow } from "./EventDetailRow";
 
@@ -27,7 +30,15 @@ export type SuccessResult =
     };
 
 /** Shown after a successful submit: confirmation (members) or payment instructions (non-members). */
-export function SuccessPanel({ result, eventTitle }: { result: SuccessResult; eventTitle: string }) {
+export function SuccessPanel({
+  result,
+  eventTitle,
+  manageUrl,
+}: {
+  result: SuccessResult;
+  eventTitle: string;
+  manageUrl: string;
+}) {
   const accepted = result.kind === "accepted";
   return (
     <>
@@ -113,6 +124,19 @@ export function SuccessPanel({ result, eventTitle }: { result: SuccessResult; ev
           </div>
         </>
       )}
+      <div className="border-t border-slate-200/80 bg-slate-50/70 px-5 py-5 sm:px-8 lg:px-10">
+        <p className="flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            {result.kind === "accepted"
+              ? "Perlu mengubah data peserta? Anda dapat melakukannya sendiri selama pendaftaran masih dibuka."
+              : "Perlu mengubah data peserta? Anda dapat melakukannya sendiri sebelum pembayaran dikonfirmasi."}
+          </span>
+          <Link to={manageUrl} className={buttonClass("secondary", "sm", "self-start sm:self-auto")}>
+            <PencilSquareIcon className="size-4" aria-hidden="true" />
+            Pendaftaran Saya
+          </Link>
+        </p>
+      </div>
     </>
   );
 }

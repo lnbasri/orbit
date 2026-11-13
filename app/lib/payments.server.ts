@@ -33,9 +33,10 @@ export async function confirmPayment(
     db
       .prepare(
         `UPDATE registrations SET status = 'accepted', payment_status = 'paid', paid_at = ?, confirmed_by = ?
-         WHERE id = ? AND status = 'pending_payment' AND payment_status = 'pending' AND pay_deadline > ?`,
+         WHERE id = ? AND status = 'pending_payment' AND payment_status = 'pending' AND pay_deadline > ?
+           AND edit_rev IS ?`, // a self-service edit since the participants were read makes this a no-op (reload)
       )
-      .bind(nowIso, actor, registrationId, nowIso),
+      .bind(nowIso, actor, registrationId, nowIso, reg.edit_rev),
     ...participants.map((p) =>
       db
         .prepare(

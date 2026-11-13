@@ -6,13 +6,14 @@
  *   (top level)  local development: D1 is emulated by Miniflare, secrets come from `.dev.vars`
  *   test         TEMPORARY public test Worker  `ppme-registration`        on workers.dev, form only (/admin is 404)
  *   test-admin   TEMPORARY admin for the test  `ppme-registration-admin`  on workers.dev, /admin only, app login (email PIN / Google)
- *   production        (planned, not created) public form on event.ppmedenhaag.nl, ENABLE_ADMIN=false, cron, its own NEW clean D1
- *   production-admin  (planned, not created) admin + later the scanner on event-admin.ppmedenhaag.nl, ENABLE_PUBLIC=false, no cron,
- *                     app login, same new D1. See docs/deploy-runbook.md (Track 2) and docs/dns-migration-todo.md.
+ *   production        `ppme-event`        public form on event.ppmedenhaag.nl (custom domain), ENABLE_ADMIN=false, cron, its own NEW clean D1 `ppme-registration-prod`
+ *   production-admin  `ppme-event-admin`  admin + later the scanner on event-admin.ppmedenhaag.nl (custom domain), ENABLE_PUBLIC=false, no cron,
+ *                     app login, same new D1. (Config added 13 Nov; not deployed until secrets are set.) See docs/deploy-runbook.md (Track 2) and docs/dns-migration-todo.md.
  * Admin login is the app's own (no Cloudflare Access): a 6-digit PIN by email via Resend, optionally Google sign-in
  * (set GOOGLE_CLIENT_ID below + `wrangler secret put GOOGLE_CLIENT_SECRET --env <admin env>`); sessions last 24 h.
  * Secrets are per Worker: wrangler secret put <NAME> --env <env>   (test: TURNSTILE_SECRET + RESEND_API_KEY; test-admin: TURNSTILE_SECRET + RESEND_API_KEY [+ GOOGLE_CLIENT_SECRET])
  * Feature switches (string "false" turns one off, anything else = on): ENABLE_PUBLIC (form) and ENABLE_ADMIN (/admin).
+ * PUBLIC_APP_URL = origin of the PUBLIC Worker, set in every env (also the admin one): links in emails ("Pendaftaran saya").
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
@@ -38,6 +39,7 @@
 	"vars": {
 		"APP_ENV": "development",
 		"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
+		"PUBLIC_APP_URL": "http://localhost:5173",
 		// Cloudflare test site key: always passes. Replace for production.
 		"TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
 		// "log" = store emails in the local outbox (viewable at /admin/outbox); "resend" = send via Resend.
@@ -72,6 +74,7 @@
 			"vars": {
 				"APP_ENV": "production",
 				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
+				"PUBLIC_APP_URL": "https://ppme-registration.ppme-registration.workers.dev",
 				// The admin lives on its own Worker (`test-admin`): smaller attack surface for the public host.
 				"ENABLE_ADMIN": "false",
 				"TURNSTILE_SITE_KEY": "0x4AAAAAAF9STdC9uclCsE_i",
@@ -106,6 +109,7 @@
 			"vars": {
 				"APP_ENV": "production",
 				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
+				"PUBLIC_APP_URL": "https://ppme-registration.ppme-registration.workers.dev",
 				"ENABLE_PUBLIC": "false",
 				// Turnstile on the login form (code requests). Same widget as `test`: its hostname list must include this
 				// Worker's workers.dev address, and this Worker needs its own TURNSTILE_SECRET secret.
@@ -118,6 +122,69 @@
 				"ADMIN_EMAILS": "",
 				// Google sign-in: fill in the OAuth client id and set the GOOGLE_CLIENT_SECRET secret on this Worker.
 				// Authorised redirect URI: https://ppme-registration-admin.ppme-registration.workers.dev/admin/auth/google/callback
+				"GOOGLE_CLIENT_ID": ""
+			}
+		},
+
+		// ---- PRODUCTION: public form on https://event.ppmedenhaag.nl (its /admin is 404). Only Worker with the 5-minute cron.
+		// The hostname is created by the custom domain (Cloudflare adds the DNS record in the zone). Secrets: TURNSTILE_SECRET, RESEND_API_KEY.
+		"production": {
+			"name": "ppme-event",
+			"workers_dev": false,
+			"preview_urls": false,
+			"routes": [{ "pattern": "event.ppmedenhaag.nl", "custom_domain": true }],
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "ppme-registration-prod",
+					"database_id": "9f91edd2-862f-47ef-831f-49a1b43fae4e",
+					"migrations_dir": "migrations"
+				}
+			],
+			"vars": {
+				"APP_ENV": "production",
+				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
+				"PUBLIC_APP_URL": "https://event.ppmedenhaag.nl",
+				"ENABLE_ADMIN": "false",
+				"TURNSTILE_SITE_KEY": "0x4AAAAAAF9STdC9uclCsE_i",
+				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
+				"BANK_IBAN": "NL26 INGB 0002 1661 44",
+				"EMAIL_MODE": "resend",
+				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
+				"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
+				"ADMIN_EMAILS": "",
+				"GOOGLE_CLIENT_ID": ""
+			}
+		},
+
+		// ---- PRODUCTION-ADMIN: admin (scanner later) on https://event-admin.ppmedenhaag.nl, app login, same D1 as `production`, no cron.
+		// Secrets: TURNSTILE_SECRET, RESEND_API_KEY [+ GOOGLE_CLIENT_SECRET]. Google redirect URI: https://event-admin.ppmedenhaag.nl/admin/auth/google/callback
+		"production-admin": {
+			"name": "ppme-event-admin",
+			"workers_dev": false,
+			"preview_urls": false,
+			"routes": [{ "pattern": "event-admin.ppmedenhaag.nl", "custom_domain": true }],
+			"triggers": { "crons": [] },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "ppme-registration-prod",
+					"database_id": "9f91edd2-862f-47ef-831f-49a1b43fae4e",
+					"migrations_dir": "migrations"
+				}
+			],
+			"vars": {
+				"APP_ENV": "production",
+				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
+				"PUBLIC_APP_URL": "https://event.ppmedenhaag.nl",
+				"ENABLE_PUBLIC": "false",
+				"TURNSTILE_SITE_KEY": "0x4AAAAAAF9STdC9uclCsE_i",
+				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
+				"BANK_IBAN": "NL26 INGB 0002 1661 44",
+				"EMAIL_MODE": "resend",
+				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <kajian@ppmedenhaag.nl>",
+				"EMAIL_REPLY_TO": "kajian@ppmedenhaag.nl",
+				"ADMIN_EMAILS": "",
 				"GOOGLE_CLIENT_ID": ""
 			}
 		}

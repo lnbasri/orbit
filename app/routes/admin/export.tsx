@@ -6,6 +6,7 @@ import { exportRows, type RegistrationFilters } from "~/lib/admin.server";
 import { toCsv } from "~/lib/csv";
 import { audit, getEventBySlug } from "~/lib/db.server";
 import { getAppEnv } from "~/lib/env.server";
+import { exportRowsToIndonesian } from "~/lib/format";
 
 // Resource route (no UI): GET /admin/export?status=…&member=…  → CSV, one row per participant.
 export async function loader({ url, context }: Route.LoaderArgs) {
@@ -24,7 +25,8 @@ export async function loader({ url, context }: Route.LoaderArgs) {
   await audit(env.DB, context.get(adminEmailContext), "export.csv", null, { filters, rows: rows.length });
 
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
-  return new Response(toCsv(rows), {
+  const csv = exportRowsToIndonesian(rows);
+  return new Response(toCsv(csv.rows, csv.columns), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="${event.slug}-peserta-${stamp}.csv"`,

@@ -27,7 +27,7 @@ import { adminEmailContext } from "~/lib/admin-context";
 import { auditFor, emailLogFor } from "~/lib/admin.server";
 import { getParticipants, getRegistration } from "~/lib/db.server";
 import { getAppEnv } from "~/lib/env.server";
-import { GENDER_LABEL, formatDateTime, formatEuro } from "~/lib/format";
+import { AGE_GROUP_SHORT, GENDER_LABEL, formatDateTime, formatEuro } from "~/lib/format";
 
 export async function loader({ params }: Route.LoaderArgs) {
   const env = getAppEnv();
@@ -216,7 +216,7 @@ export default function RegistrationDetail({ loaderData }: Route.ComponentProps)
                 </span>
                 <span className="min-w-[160px] flex-1 font-medium text-slate-900">{p.full_name}</span>
                 <span className="text-slate-600 tabular-nums">
-                  {p.birth_year} · {p.gender ? GENDER_LABEL[p.gender] : "–"}
+                  {AGE_GROUP_SHORT[p.age_group] ?? p.age_group} · {p.gender ? GENDER_LABEL[p.gender] : "–"}
                 </span>
                 <span className="font-mono text-xs text-slate-500">
                   {p.qr_token ? (showTickets ? p.qr_token : `${p.qr_token.slice(0, 4)}••••`) : "belum ada tiket"}

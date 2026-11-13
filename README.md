@@ -70,11 +70,19 @@ Local tips:
   their sessions). You cannot remove yourself and the last admin cannot be removed (both enforced in SQL).
   `ADMIN_EMAILS` is only a one-time seed used while the table is empty. Fails closed: no valid session = redirect to login.
 
+- **Pendaftaran Saya (self-service):** `/e/<slug>/pendaftaran-saya`. The registrant enters their email (Turnstile),
+  gets a 6-digit code (only if the email has an active registration; same answer otherwise) and sees their registration
+  for 2 hours. Members can change it until registration closes; non-members until the committee confirms the payment
+  (then view only: changes by email to the committee). Name, WhatsApp, participants and their number can change; email
+  and membership cannot. Each save is one conditional D1 batch (revision + status + quota) and re-queues the updated
+  confirmation / payment-instructions email. Email links use `PUBLIC_APP_URL` (set in every env, also the admin one).
+
 ## Project layout
 
 ```
 app/
   routes/register.tsx           public form + action
+  routes/my-registration.tsx    "Pendaftaran Saya": email code login, view + self-service edit
   routes/admin/*.tsx            admin pages (layout.tsx holds the auth middleware)
   lib/registration.server.ts    quota + registration transaction
   lib/payments.server.ts        approve payment, verify membership

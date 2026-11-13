@@ -1,34 +1,40 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  CakeIcon,
+  ClipboardDocumentCheckIcon,
   EnvelopeIcon,
   ExclamationCircleIcon,
-  PaperAirplaneIcon,
+  IdentificationIcon,
+  LockClosedIcon,
   PhoneIcon,
-  ShieldCheckIcon,
+  UserGroupIcon,
   UserIcon,
+  UsersIcon,
 } from "@heroicons/react/24/outline";
-import { Form } from "react-router";
+import { Form, Link } from "react-router";
 
-import { Turnstile } from "~/components/Turnstile";
-import { Callout, Spinner, buttonClass } from "~/components/ui";
+import { Callout, buttonClass } from "~/components/ui";
 import { formatEuro } from "~/lib/format";
-import type { FieldErrors } from "~/lib/validation";
+import { validateRegistrationDraft, type FieldErrors } from "~/lib/validation";
 import { CheckField, ChoiceField, CountCombobox, TextInputField } from "./controls";
 import type { PublicEvent } from "./HeaderSection";
+import { ReviewDialog, type ReviewSummary } from "./ReviewDialog";
+
+const FORM_ID = "registration-form";
 
 interface ParticipantDraft {
   name: string;
   gender: string;
-  birthYear: string;
+  ageGroup: string;
 }
 
-const emptyParticipant = (): ParticipantDraft => ({ name: "", gender: "", birthYear: "" });
+const emptyParticipant = (): ParticipantDraft => ({ name: "", gender: "", ageGroup: "" });
 
 export interface FormFailure {
   ok: false;
   errors: FieldErrors;
   message: string;
+  /** Duplicate email: offer the "Pendaftaran Saya" page. */
+  manageLink?: boolean;
 }
 
 export function RegistrationForm({
@@ -48,12 +54,23 @@ export function RegistrationForm({
   const [membership, setMembership] = useState("");
   const [consent, setConsent] = useState(false);
   const [marketingOptIn, setMarketingOptIn] = useState(false);
+  const [email, setEmail] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  /** Fields the visitor has left at least once (live errors); `edited:<field>` hides a stale server error. */
+  const [touched, setTouched] = useState<Set<string>>(new Set());
+  const touch = (key: string) => setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
   const [count, setCount] = useState(1);
   const [participants, setParticipants] = useState<ParticipantDraft[]>([emptyParticipant()]);
   const [firstNameTouched, setFirstNameTouched] = useState(false);
-  const [token, setToken] = useState<string | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState("");
+  const [review, setReview] = useState<ReviewSummary | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+
+  // A server-side failure (Turnstile, quota, duplicate email, validation) closes the review and shows the error.
+  useEffect(() => {
+    if (failure) setReviewOpen(false);
+  }, [failure]);
 
   // A fresh key per filled-in form: a double submit returns the same registration.
   useEffect(() => setIdempotencyKey(crypto.randomUUID()), []);
@@ -72,14 +89,21 @@ export function RegistrationForm({
     }
   }, [registrantName, firstNameTouched]);
 
-  // Radio groups, the combobox and the checkbox have no native "required" validation: check them after the first submit try.
-  const errors: FieldErrors = { ...(failure?.errors ?? {}) };
-  if (submitted && !membership) errors.membership = "Pilih status keanggotaan.";
-  if (submitted && !consent) errors.consent = "Persetujuan privasi wajib dicentang.";
-  participants.forEach((p, i) => {
-    if (submitted && !p.gender) errors[`participants.${i}.gender`] = "Jenis kelamin wajib dipilih.";
-  });
-  const currentYear = useMemo(() => new Date().getFullYear(), []);
+  // Front-end validation (same rules as the server, Indonesian messages). Shown per field after blur / first submit try;
+  // a server error (duplicate email, ...) stays until the visitor edits that field.
+  const clientErrors = useMemo(
+    () =>
+      validateRegistrationDraft(
+        { registrantName, membership, email, whatsapp, participants, consent, marketingOptIn, idempotencyKey: undefined },
+        event.maxFamily,
+      ),
+    [registrantName, membership, email, whatsapp, participants, consent, marketingOptIn, event.maxFamily],
+  );
+  const errors: FieldErrors = {};
+  for (const [key, msg] of Object.entries(failure?.errors ?? {})) if (!touched.has(`edited:${key}`)) errors[key] = msg;
+  for (const [key, msg] of Object.entries(clientErrors)) if (submitted || touched.has(key)) errors[key] = msg;
+  const blur = (key: string) => () => touch(key);
+  const change = (key: string) => touch(`edited:${key}`);
 
   const update = (i: number, patch: Partial<ParticipantDraft>) =>
     setParticipants((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
@@ -87,16 +111,42 @@ export function RegistrationForm({
   return (
     <Form
       method="post"
+      id={FORM_ID}
+      noValidate
       onSubmit={(e) => {
         setSubmitted(true);
-        if (!membership || !consent || participants.some((p) => !p.gender)) e.preventDefault();
+        if (Object.keys(clientErrors).length > 0) {
+          e.preventDefault();
+          setReviewOpen(false);
+          const form = e.currentTarget;
+          // After the error lines have rendered: jump to the first invalid field.
+          requestAnimationFrame(() => {
+            const first = form.querySelector<HTMLElement>('[aria-invalid="true"]');
+            first?.scrollIntoView({ block: "center", behavior: "smooth" });
+            first?.focus({ preventScroll: true });
+          });
+          return;
+        }
+        // First submit opens the review; only the review's "Ya, kirim pendaftaran" button really sends the form.
+        if (!reviewOpen) {
+          e.preventDefault();
+          setReview({
+            registrantName: registrantName.trim(),
+            membership,
+            email: email.trim(),
+            whatsapp: whatsapp.trim(),
+            participants: participants.map((p) => ({ ...p, name: p.name.trim() })),
+            marketingOptIn,
+          });
+          setReviewOpen(true);
+        }
       }}
     >
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <input type="hidden" name="participantCount" value={count} />
 
       <div className="divide-y divide-slate-200/80 border-t border-slate-200/80">
-        <FormSection step="A" title="Data pendaftar" description="Orang yang mengisi formulir dan menerima email konfirmasi.">
+        <FormSection icon={IdentificationIcon} title="Data pendaftar" description="Orang yang mengisi formulir dan menerima email konfirmasi.">
           <div className="grid gap-5 md:grid-cols-2">
             <TextInputField
               label="Nama lengkap pendaftar"
@@ -105,7 +155,11 @@ export function RegistrationForm({
               maxLength={120}
               autoComplete="name"
               value={registrantName}
-              onChange={(e) => setRegistrantName(e.target.value)}
+              onChange={(e) => {
+                change("registrantName");
+                setRegistrantName(e.target.value);
+              }}
+              onBlur={blur("registrantName")}
               placeholder="Masukkan nama lengkap"
               error={errors.registrantName}
             />
@@ -113,7 +167,10 @@ export function RegistrationForm({
               label="Apakah Anda anggota PPME Den Haag?"
               name="membership"
               value={membership}
-              onChange={setMembership}
+              onChange={(v) => {
+                change("membership");
+                setMembership(v);
+              }}
               error={errors.membership}
               options={[
                 {
@@ -136,6 +193,12 @@ export function RegistrationForm({
               name="email"
               type="email"
               autoComplete="email"
+              value={email}
+              onChange={(e) => {
+                change("email");
+                setEmail(e.target.value);
+              }}
+              onBlur={blur("email")}
               placeholder="nama@email.com"
               hint="Konfirmasi dan QR Code dikirim ke alamat ini."
               error={errors.email}
@@ -146,6 +209,12 @@ export function RegistrationForm({
               name="whatsapp"
               type="tel"
               autoComplete="tel"
+              value={whatsapp}
+              onChange={(e) => {
+                change("whatsapp");
+                setWhatsapp(e.target.value);
+              }}
+              onBlur={blur("whatsapp")}
               placeholder="+31 6 ..."
               hint="Hanya untuk menghubungi Anda terkait acara ini."
               error={errors.whatsapp}
@@ -154,7 +223,7 @@ export function RegistrationForm({
         </FormSection>
 
         <FormSection
-          step="B"
+          icon={UsersIcon}
           title="Jumlah peserta"
           description={`Perorangan atau keluarga, maksimal ${event.maxFamily} orang termasuk Anda.`}
         >
@@ -170,7 +239,7 @@ export function RegistrationForm({
         </FormSection>
 
         <FormSection
-          step="C"
+          icon={UserGroupIcon}
           title="Data seluruh peserta"
           description="Tahun lahir dan jenis kelamin diperlukan untuk pengaturan tempat dan kategori usia."
         >
@@ -195,8 +264,10 @@ export function RegistrationForm({
                     value={p.name}
                     onChange={(e) => {
                       if (i === 0) setFirstNameTouched(true);
+                      change(`participants.${i}.name`);
                       update(i, { name: e.target.value });
                     }}
+                    onBlur={blur(`participants.${i}.name`)}
                     error={errors[`participants.${i}.name`]}
                     className="sm:col-span-2"
                   />
@@ -204,25 +275,31 @@ export function RegistrationForm({
                     label="Jenis kelamin"
                     name={`p${i}_gender`}
                     value={p.gender}
-                    onChange={(v) => update(i, { gender: v })}
+                    onChange={(v) => {
+                      change(`participants.${i}.gender`);
+                      update(i, { gender: v });
+                    }}
                     error={errors[`participants.${i}.gender`]}
                     options={[
-                      { value: "male", label: "Laki-laki" },
-                      { value: "female", label: "Perempuan" },
+                      { value: "laki-laki", label: "Laki-laki" },
+                      { value: "perempuan", label: "Perempuan" },
                     ]}
                   />
-                  <TextInputField
-                    label="Tahun lahir"
-                    icon={CakeIcon}
-                    name={`p${i}_birthYear`}
-                    type="number"
-                    inputMode="numeric"
-                    min={1900}
-                    max={currentYear}
-                    value={p.birthYear}
-                    onChange={(e) => update(i, { birthYear: e.target.value })}
-                    placeholder="Contoh: 2015"
-                    error={errors[`participants.${i}.birthYear`]}
+                  <ChoiceField
+                    label="Kelompok usia"
+                    name={`p${i}_ageGroup`}
+                    value={p.ageGroup}
+                    onChange={(v) => {
+                      change(`participants.${i}.ageGroup`);
+                      update(i, { ageGroup: v });
+                    }}
+                    error={errors[`participants.${i}.ageGroup`]}
+                    options={[
+                      { value: "anak", label: "Anak", hint: "0 – di bawah 12 tahun" },
+                      { value: "remaja", label: "Remaja", hint: "12 – di bawah 18 tahun" },
+                      { value: "dewasa", label: "Dewasa", hint: "18 tahun ke atas" },
+                    ]}
+                    className="sm:col-span-2"
                   />
                 </div>
               </fieldset>
@@ -230,7 +307,7 @@ export function RegistrationForm({
           </div>
         </FormSection>
 
-        <FormSection step="D" title="Privasi" description="Bagaimana data Anda digunakan dan disimpan.">
+        <FormSection icon={LockClosedIcon} title="Privasi" description="Bagaimana data Anda digunakan dan disimpan.">
           <p className="text-sm leading-relaxed text-slate-600">
             PPME Den Haag memproses data di formulir ini hanya untuk pendaftaran, pembayaran, tiket, dan check-in acara
             ini. Data disimpan di layanan Cloudflare (Uni Eropa) dan email dikirim melalui Resend. Data peserta dihapus
@@ -239,7 +316,13 @@ export function RegistrationForm({
           </p>
           <div className="mt-5 space-y-4 border-t border-slate-200/80 pt-5">
             <div>
-              <CheckField name="consent" checked={consent} onChange={setConsent} invalid={!!errors.consent} required>
+              <CheckField
+                name="consent"
+                checked={consent}
+                onChange={(v) => {
+                  change("consent");
+                  setConsent(v);
+                }} invalid={!!errors.consent} required>
                 Saya menyetujui pemrosesan data saya dan seluruh peserta yang saya daftarkan untuk keperluan kajian
                 keagamaan ini, dan saya berwenang mendaftarkan mereka.
               </CheckField>
@@ -262,60 +345,60 @@ export function RegistrationForm({
         {failure ? (
           <Callout tone="danger" role="alert" icon={ExclamationCircleIcon} className="mb-5">
             <p>{failure.message}</p>
+            {failure.manageLink ? (
+              <p>
+                <Link to={`/e/${event.slug}/pendaftaran-saya`} className="font-semibold underline">
+                  Buka Pendaftaran Saya
+                </Link>
+              </p>
+            ) : null}
           </Callout>
         ) : null}
-        <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-          <div className="min-w-0">
-            <Turnstile siteKey={siteKey} resetKey={failure} onToken={setToken} />
-          </div>
-          <button
-            type="submit"
-            disabled={submitting || !token}
-            className={buttonClass("primary", "lg", "w-full md:w-auto md:min-w-72")}
-          >
-            {submitting ? (
-              <>
-                <Spinner />
-                Mengirim pendaftaran…
-              </>
-            ) : !token ? (
-              <>
-                <ShieldCheckIcon className="size-5" aria-hidden="true" />
-                Menunggu verifikasi…
-              </>
-            ) : (
-              <>
-                Kirim pendaftaran
-                <PaperAirplaneIcon className="size-5" aria-hidden="true" />
-              </>
-            )}
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <p className="text-sm text-slate-600">Anda dapat memeriksa kembali seluruh data sebelum pendaftaran dikirim.</p>
+          <button type="submit" className={buttonClass("primary", "lg", "w-full md:w-auto md:min-w-72")}>
+            Kirim pendaftaran
+            <ClipboardDocumentCheckIcon className="size-5" aria-hidden="true" />
           </button>
         </div>
       </div>
+
+      <ReviewDialog
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        formId={FORM_ID}
+        siteKey={siteKey}
+        summary={review}
+        priceCents={event.priceCents}
+        payWindowHours={event.payWindowHours}
+        submitting={submitting}
+      />
     </Form>
   );
 }
 
-/** Two-column form section: step, heading and description on the left, fields on the right. */
+/** Two-column form section: icon, heading and description on the left, fields on the right. */
 function FormSection({
-  step,
+  icon: Icon,
   title,
   description,
   children,
 }: {
-  step: string;
+  icon: typeof UserIcon;
   title: string;
   description?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="grid gap-x-10 gap-y-5 px-5 py-8 sm:px-8 lg:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] lg:px-10 lg:py-10">
+    <section className="grid gap-x-10 gap-y-5 px-5 py-8 sm:px-8 lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] lg:px-10 lg:py-10">
       <div>
-        <div className="flex items-center gap-3 lg:block">
-          <span className="text-[11px] font-semibold tracking-[0.14em] text-brand uppercase">Bagian {step}</span>
-          <h2 className="text-base font-semibold text-slate-900 lg:mt-1.5">{title}</h2>
+        <div className="flex items-center gap-3 lg:flex-col lg:items-start">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand text-white shadow-sm shadow-brand/20">
+            <Icon className="size-5" aria-hidden="true" />
+          </span>
+          <h2 className="text-lg font-semibold tracking-tight text-slate-900 sm:text-xl">{title}</h2>
         </div>
-        {description ? <p className="mt-1.5 text-sm leading-relaxed text-slate-500">{description}</p> : null}
+        {description ? <p className="mt-2 text-sm leading-relaxed text-slate-500">{description}</p> : null}
       </div>
       <div className="min-w-0">{children}</div>
     </section>

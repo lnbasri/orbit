@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-export const MIN_BIRTH_YEAR = 1900;
-
 /** Keep digits and a leading +. 00… becomes +…; Dutch 06… becomes +316…. */
 export function normalizeWhatsapp(raw: string): string {
   let v = raw.trim().replace(/[\s\-().]/g, "");
@@ -10,20 +8,16 @@ export function normalizeWhatsapp(raw: string): string {
   return v;
 }
 
-const participantSchema = (currentYear: number) =>
+const participantSchema = () =>
   z.object({
     name: z.string().trim().min(1, "Nama peserta wajib diisi.").max(120, "Nama terlalu panjang."),
-    gender: z.enum(["male", "female"], { error: "Jenis kelamin wajib dipilih." }),
-    birthYear: z.coerce
-      .number({ error: "Tahun lahir tidak valid." })
-      .int("Tahun lahir tidak valid.")
-      .min(MIN_BIRTH_YEAR, "Tahun lahir tidak valid.")
-      .max(currentYear, "Tahun lahir tidak valid."),
+    gender: z.enum(["laki-laki", "perempuan"], { error: "Jenis kelamin wajib dipilih." }),
+    ageGroup: z.enum(["anak", "remaja", "dewasa"], { error: "Kelompok usia wajib dipilih." }),
   });
 
-export function registrationSchema(maxFamily: number, currentYear: number) {
+export function registrationSchema(maxFamily: number) {
   return z.object({
-    registrantName: z.string().trim().min(1, "Nama pendaftar wajib diisi.").max(120),
+    registrantName: z.string().trim().min(1, "Nama pendaftar wajib diisi.").max(120, "Nama terlalu panjang."),
     membership: z.enum(["Ya", "Tidak"], { error: "Pilih status keanggotaan." }),
     email: z.string().trim().toLowerCase().pipe(z.email("Format email tidak valid.")),
     whatsapp: z
@@ -31,7 +25,7 @@ export function registrationSchema(maxFamily: number, currentYear: number) {
       .transform(normalizeWhatsapp)
       .pipe(z.string().regex(/^\+?\d{8,15}$/, "Nomor WhatsApp tidak valid.")),
     participants: z
-      .array(participantSchema(currentYear))
+      .array(participantSchema())
       .min(1, "Minimal 1 peserta.")
       .max(maxFamily, `Maksimal ${maxFamily} peserta.`),
     consent: z.literal(true, { error: "Persetujuan privasi wajib dicentang." }),
@@ -48,7 +42,7 @@ export function formToRegistrationDraft(form: FormData) {
   const participants = Array.from({ length: count }, (_, i) => ({
     name: String(form.get(`p${i}_name`) ?? ""),
     gender: String(form.get(`p${i}_gender`) ?? ""),
-    birthYear: String(form.get(`p${i}_birthYear`) ?? ""),
+    ageGroup: String(form.get(`p${i}_ageGroup`) ?? ""),
   }));
   const key = String(form.get("idempotencyKey") ?? "");
   return {
@@ -73,4 +67,59 @@ export function toFieldErrors(error: z.ZodError): FieldErrors {
     if (!out[key]) out[key] = issue.message;
   }
   return out;
+}
+
+/**
+ * Front-end validation for the public form: the same schema the server uses (so both always agree), with
+ * friendlier Indonesian messages for empty and malformed fields. The server stays authoritative.
+ */
+export function validateRegistrationDraft(
+  draft: ReturnType<typeof formToRegistrationDraft>,
+  maxFamily: number,
+): FieldErrors {
+  const parsed = registrationSchema(maxFamily).safeParse(draft);
+  if (parsed.success) return {};
+  const errors = toFieldErrors(parsed.error);
+
+  if (errors.email)
+    errors.email = draft.email.trim() ? "Format email tidak valid. Contoh: nama@email.com." : "Alamat email wajib diisi.";
+  if (errors.whatsapp)
+    errors.whatsapp = draft.whatsapp.trim()
+      ? "Nomor WhatsApp tidak valid. Gunakan 8–15 angka, contoh: +31 6 1234 5678."
+      : "Nomor WhatsApp wajib diisi.";
+  return errors;
+}
+
+/** Self-service edit ("Pendaftaran saya"): the same field rules as registration, plus the existing participant id. */
+export function selfEditSchema(maxFamily: number) {
+  return z.object({
+    registrantName: z.string().trim().min(1, "Nama pendaftar wajib diisi.").max(120),
+    whatsapp: z
+      .string()
+      .transform(normalizeWhatsapp)
+      .pipe(z.string().regex(/^\+?\d{8,15}$/, "Nomor WhatsApp tidak valid.")),
+    participants: z
+      .array(participantSchema().extend({ id: z.string().max(64).optional() }))
+      .min(1, "Minimal 1 peserta.")
+      .max(maxFamily, `Maksimal ${maxFamily} peserta.`),
+  });
+}
+
+export type SelfEditInput = z.infer<ReturnType<typeof selfEditSchema>>;
+
+export function formToSelfEditDraft(form: FormData) {
+  const count = Math.max(0, Math.min(20, Number(form.get("participantCount") ?? 0) || 0));
+  return {
+    registrantName: String(form.get("registrantName") ?? ""),
+    whatsapp: String(form.get("whatsapp") ?? ""),
+    participants: Array.from({ length: count }, (_, i) => {
+      const id = String(form.get(`p${i}_id`) ?? "");
+      return {
+        ...(id ? { id } : {}),
+        name: String(form.get(`p${i}_name`) ?? ""),
+        gender: String(form.get(`p${i}_gender`) ?? ""),
+        ageGroup: String(form.get(`p${i}_ageGroup`) ?? ""),
+      };
+    }),
+  };
 }

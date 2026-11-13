@@ -1,5 +1,5 @@
 import { addAdmin, removeAdmin } from "./admins.server";
-import { updateRegistrationWindow } from "./events.server";
+import { updateEventPrice, updateQuotas, updateRegistrationWindow } from "./events.server";
 import { emailConfig, type AppEnv } from "./config.server";
 import { audit, getEventBySlug } from "./db.server";
 import { deliverEmail, type EmailKind } from "./email/send.server";
@@ -56,6 +56,16 @@ export async function handleAdminIntent(env: AppEnv, actor: string, form: FormDa
         String(form.get("opensAt") ?? ""),
         String(form.get("closesAt") ?? ""),
       );
+    }
+    case "save-event-price": {
+      const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");
+      if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+      return updateEventPrice(env.DB, actor, event.id, String(form.get("price") ?? ""));
+    }
+    case "save-quotas": {
+      const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");
+      if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+      return updateQuotas(env.DB, actor, event.id, String(form.get("quotaMember") ?? ""), String(form.get("quotaNonMember") ?? ""));
     }
     case "run-job": {
       const report = await runDeadlineJob(env.DB, cfg);

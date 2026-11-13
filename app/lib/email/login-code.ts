@@ -20,6 +20,45 @@ export interface LoginCodeEmailArgs {
   country?: string | null;
   userAgent?: string | null;
   replyTo: string;
+  /** "admin" (default): Dashboard Panitia. "registrant": a participant opening their own registration. */
+  audience?: "admin" | "registrant";
+  /** Registrant only: the event title and the path of the page the code is for (e.g. /e/<slug>/pendaftaran-saya). */
+  eventTitle?: string;
+  path?: string;
+}
+
+function copyFor(args: LoginCodeEmailArgs) {
+  if (args.audience === "registrant") {
+    const title = args.eventTitle ?? "Kajian PPME Den Haag";
+    return {
+      subject: `${args.code} adalah kode akses pendaftaran Anda – ${title}`,
+      label: "Pendaftaran Saya",
+      eyebrow: "Kode akses",
+      heading: "Lihat atau ubah pendaftaran",
+      intro: `Gunakan kode berikut untuk membuka pendaftaran Anda untuk ${escapeHtml(title)}. Masukkan kode ini di halaman yang sedang Anda buka.`,
+      introText: `Gunakan kode berikut untuk membuka pendaftaran Anda untuk ${title}:`,
+      codeLabel: "Kode akses Anda",
+      usage: "hanya untuk satu kali akses",
+      footer: "permintaan akses pendaftaran di",
+      path: args.path ?? "/",
+      noRequest:
+        "Abaikan email ini. Tanpa kode ini tidak ada yang dapat membuka pendaftaran Anda.",
+    };
+  }
+  return {
+    subject: `${args.code} adalah kode masuk Dashboard Panitia PPME Den Haag`,
+    label: "Dashboard Panitia",
+    eyebrow: "Kode masuk",
+    heading: "Masuk ke Dashboard Panitia",
+    intro:
+      "Gunakan kode berikut untuk masuk ke Dashboard Panitia Kajian PPME Den Haag. Masukkan kode ini di halaman masuk yang sedang Anda buka.",
+    introText: "Gunakan kode berikut untuk masuk ke Dashboard Panitia Kajian PPME Den Haag:",
+    codeLabel: "Kode masuk Anda",
+    usage: "hanya untuk satu kali masuk",
+    footer: "permintaan masuk ke",
+    path: "/admin",
+    noRequest: "Abaikan email ini. Tanpa kode ini tidak ada yang dapat masuk ke akun Anda.",
+  };
 }
 
 /** "Belanda" for NL. Falls back to the raw code. */
@@ -80,7 +119,8 @@ export function loginCodeEmail(args: LoginCodeEmailArgs) {
   const origin = appOrigin.replace(/\/$/, "");
   const host = origin.replace(/^https?:\/\//, "");
 
-  const subject = `${code} adalah kode masuk Dashboard Panitia PPME Den Haag`;
+  const copy = copyFor(args);
+  const subject = copy.subject;
   const preheader = `Kode berlaku ${validMinutes} menit (sampai ${until} waktu Belanda). Jangan bagikan kode ini kepada siapa pun.`;
 
   const details = [
@@ -128,7 +168,7 @@ export function loginCodeEmail(args: LoginCodeEmailArgs) {
                   <img src="${escapeHtml(origin)}/logo-ppme.png" width="77" height="40" alt="PPME Den Haag" style="display:block;height:40px;width:auto;">
                 </td>
                 <td class="hide-sm" align="right" style="vertical-align:middle;font-family:${FONT};font-size:11px;line-height:16px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#64748B;">
-                  Dashboard Panitia
+                  ${escapeHtml(copy.label)}
                 </td>
               </tr>
             </table>
@@ -137,10 +177,10 @@ export function loginCodeEmail(args: LoginCodeEmailArgs) {
         <!-- body -->
         <tr>
           <td class="px" style="padding:36px 40px 8px 40px;">
-            <p style="margin:0 0 10px 0;font-family:${FONT};font-size:11px;line-height:16px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:${BRAND};">Kode masuk</p>
-            <h1 style="margin:0 0 20px 0;font-family:${FONT};font-size:24px;line-height:32px;font-weight:700;color:#0F172A;">Masuk ke Dashboard Panitia</h1>
+            <p style="margin:0 0 10px 0;font-family:${FONT};font-size:11px;line-height:16px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:${BRAND};">${escapeHtml(copy.eyebrow)}</p>
+            <h1 style="margin:0 0 20px 0;font-family:${FONT};font-size:24px;line-height:32px;font-weight:700;color:#0F172A;">${escapeHtml(copy.heading)}</h1>
             <p style="margin:0 0 12px 0;font-family:${FONT};font-size:15px;line-height:24px;color:#334155;">Assalamu’alaikum warahmatullahi wabarakatuh,</p>
-            <p style="margin:0 0 28px 0;font-family:${FONT};font-size:15px;line-height:24px;color:#334155;">Gunakan kode berikut untuk masuk ke Dashboard Panitia Kajian PPME Den Haag. Masukkan kode ini di halaman masuk yang sedang Anda buka.</p>
+            <p style="margin:0 0 28px 0;font-family:${FONT};font-size:15px;line-height:24px;color:#334155;">${copy.intro}</p>
           </td>
         </tr>
         <!-- code -->
@@ -149,13 +189,13 @@ export function loginCodeEmail(args: LoginCodeEmailArgs) {
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F0F5FC;border:1px solid #C7D8F0;">
               <tr>
                 <td align="center" style="padding:26px 16px 22px 16px;">
-                  <p style="margin:0 0 8px 0;font-family:${FONT};font-size:12px;line-height:16px;font-weight:600;color:#475569;">Kode masuk Anda</p>
+                  <p style="margin:0 0 8px 0;font-family:${FONT};font-size:12px;line-height:16px;font-weight:600;color:#475569;">${escapeHtml(copy.codeLabel)}</p>
                   <p class="code" style="margin:0;padding-left:12px;font-family:${MONO};font-size:40px;line-height:48px;font-weight:700;letter-spacing:12px;color:${BRAND_DARK};">${escapeHtml(code)}</p>
                 </td>
               </tr>
               <tr>
                 <td align="center" style="padding:12px 16px;border-top:1px solid #C7D8F0;background-color:#E6EEFA;font-family:${FONT};font-size:13px;line-height:20px;color:#334155;">
-                  Berlaku <strong style="color:#0F172A;">${validMinutes} menit</strong>, sampai pukul <strong style="color:#0F172A;">${escapeHtml(until)}</strong> waktu Belanda &middot; hanya untuk satu kali masuk
+                  Berlaku <strong style="color:#0F172A;">${validMinutes} menit</strong>, sampai pukul <strong style="color:#0F172A;">${escapeHtml(until)}</strong> waktu Belanda &middot; ${escapeHtml(copy.usage)}
                 </td>
               </tr>
             </table>
@@ -176,7 +216,7 @@ export function loginCodeEmail(args: LoginCodeEmailArgs) {
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFBEB;border-left:3px solid #D97706;">
               <tr>
                 <td style="padding:14px 18px;font-family:${FONT};font-size:13px;line-height:21px;color:#78350F;">
-                  <strong style="color:#451A03;">Tidak merasa meminta kode ini?</strong> Abaikan email ini. Tanpa kode ini tidak ada yang dapat masuk ke akun Anda.
+                  <strong style="color:#451A03;">Tidak merasa meminta kode ini?</strong> ${escapeHtml(copy.noRequest)}
                   Jangan pernah membagikan kode ini; panitia tidak akan memintanya melalui WhatsApp, telepon, maupun email.
                 </td>
               </tr>
@@ -195,8 +235,8 @@ export function loginCodeEmail(args: LoginCodeEmailArgs) {
       <table role="presentation" class="container" width="560" cellpadding="0" cellspacing="0" border="0" style="width:560px;max-width:560px;">
         <tr>
           <td class="px" style="padding:20px 40px 0 40px;font-family:${FONT};font-size:12px;line-height:19px;color:#64748B;text-align:center;">
-            Email ini dikirim otomatis karena ada permintaan masuk ke
-            <a href="${escapeHtml(origin)}/admin" style="color:#475569;text-decoration:underline;">${escapeHtml(host)}</a>
+            Email ini dikirim otomatis karena ada ${escapeHtml(copy.footer)}
+            <a href="${escapeHtml(origin)}${escapeHtml(copy.path)}" style="color:#475569;text-decoration:underline;">${escapeHtml(host)}</a>
             untuk alamat ${escapeHtml(email)}.<br>
             Pertanyaan? Hubungi <a href="mailto:${escapeHtml(replyTo)}" style="color:#475569;text-decoration:underline;">${escapeHtml(replyTo)}</a>.
           </td>
@@ -216,16 +256,16 @@ export function loginCodeEmail(args: LoginCodeEmailArgs) {
   const text = [
     "Assalamu’alaikum warahmatullahi wabarakatuh,",
     "",
-    "Gunakan kode berikut untuk masuk ke Dashboard Panitia Kajian PPME Den Haag:",
+    copy.introText,
     "",
     `    ${code}`,
     "",
-    `Kode berlaku ${validMinutes} menit (sampai pukul ${until} waktu Belanda) dan hanya untuk satu kali masuk.`,
+    `Kode berlaku ${validMinutes} menit (sampai pukul ${until} waktu Belanda), ${copy.usage}.`,
     "",
     "Detail permintaan",
     ...details.map(([label, value]) => `- ${label}: ${value}`),
     "",
-    "Tidak merasa meminta kode ini? Abaikan email ini. Tanpa kode ini tidak ada yang dapat masuk ke akun Anda.",
+    `Tidak merasa meminta kode ini? ${copy.noRequest}`,
     "Jangan pernah membagikan kode ini; panitia tidak akan memintanya melalui WhatsApp, telepon, maupun email.",
     "",
     "Wassalamu’alaikum warahmatullahi wabarakatuh,",

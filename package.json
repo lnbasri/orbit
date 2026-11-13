@@ -17,6 +17,9 @@
     "cf-typegen": "wrangler types",
     "postinstall": "wrangler types",
     "db:migrate:test": "wrangler d1 migrations apply DB --remote --env test",
+    "db:migrate:production": "wrangler d1 migrations apply DB --remote --env production",
+    "deploy:production": "node scripts/deploy.mjs production",
+    "deploy:production-admin": "node scripts/deploy.mjs production-admin",
     "deploy:test": "node scripts/deploy.mjs test",
     "deploy:test-admin": "node scripts/deploy.mjs test-admin"
   },
@@ -30,6 +33,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^8.5.1",
+    "recharts": "3.2.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

@@ -4,16 +4,18 @@ import {
   CalendarDaysIcon,
   CheckCircleIcon,
   ClockIcon,
-  ExclamationTriangleIcon,
+  EnvelopeIcon,
   LockClosedIcon,
   MicrophoneIcon,
+  NoSymbolIcon,
   QrCodeIcon,
   UserGroupIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
 
-import { Callout, Eyebrow, Logo } from "~/components/ui";
+import { Eyebrow, Logo } from "~/components/ui";
 import { formatEuro, formatLongDate, formatTime } from "~/lib/format";
+import { registrationRules, type RuleKey } from "~/lib/rules";
 import { EventDetailRow } from "./EventDetailRow";
 
 export interface PublicEvent {
@@ -107,40 +109,39 @@ export function HeaderSection({ event }: { event: PublicEvent }) {
         )}
       </dl>
 
-      <div className="grid gap-6 px-5 py-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-10 lg:px-10">
-        <Callout tone="warning" role="note" icon={ExclamationTriangleIcon} title="Catatan penting" className="self-start">
-          <p>
-            Pendaftaran ditutup otomatis apabila kuota peserta sudah terpenuhi. Setelah kuota dinyatakan penuh, panitia
-            tidak melayani telepon maupun email, dan tidak menerima keluhan dari calon peserta (jamaah) yang sudah
-            mendaftar tetapi belum menerima konfirmasi atau QR Code.
-          </p>
-          <p className="font-medium">Pastikan alamat email Anda benar, dan periksa juga folder spam.</p>
-        </Callout>
-
-        <div>
-          <h2 className="text-sm font-semibold text-slate-900">Ketentuan pendaftaran</h2>
-          <ul className="mt-3 space-y-2.5 text-sm leading-relaxed text-slate-600">
-            <Rule icon={UsersIcon}>
-              Pendaftaran perorangan atau keluarga, maksimal {event.maxFamily} orang termasuk pendaftar.
+      <section aria-labelledby="ketentuan" className="px-5 py-8 sm:px-8 lg:px-10">
+        <h2 id="ketentuan" className="text-sm font-semibold text-slate-900">
+          Ketentuan pendaftaran
+        </h2>
+        <ul className="mt-3 grid gap-x-10 gap-y-2.5 text-sm leading-relaxed text-slate-600 lg:grid-cols-2">
+          {registrationRules(event).map((rule) => (
+            <Rule key={rule.key} icon={RULE_ICONS[rule.key]}>
+              {rule.parts.map((part, i) =>
+                typeof part === "string" ? (
+                  part
+                ) : (
+                  <span key={i} className="font-semibold text-slate-900">
+                    {part.b}
+                  </span>
+                ),
+              )}
             </Rule>
-            <Rule icon={UserGroupIcon}>
-              Pendaftaran ditolak bila kuota tidak mencukupi untuk seluruh peserta yang didaftarkan.
-            </Rule>
-            <Rule icon={BanknotesIcon}>
-              Anggota PPME Den Haag gratis. Non-anggota:{" "}
-              <span className="font-semibold text-slate-900">{formatEuro(event.priceCents)} per orang</span>, dibayar
-              dalam <span className="font-semibold text-slate-900">{event.payWindowHours} jam</span> setelah mendaftar.
-            </Rule>
-            <Rule icon={QrCodeIcon}>
-              QR Code dikirim lewat email setelah pendaftaran diterima atau pembayaran dikonfirmasi.
-            </Rule>
-            <Rule icon={CheckCircleIcon}>Setiap QR Code hanya dapat digunakan satu kali saat check-in.</Rule>
-          </ul>
-        </div>
-      </div>
+          ))}
+        </ul>
+      </section>
     </header>
   );
 }
+
+const RULE_ICONS: Record<RuleKey, typeof UsersIcon> = {
+  group: UsersIcon,
+  quota: UserGroupIcon,
+  closed: NoSymbolIcon,
+  fee: BanknotesIcon,
+  qr: QrCodeIcon,
+  email: EnvelopeIcon,
+  once: CheckCircleIcon,
+};
 
 function Rule({ icon: Icon, children }: { icon: typeof UsersIcon; children: React.ReactNode }) {
   return (

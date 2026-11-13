@@ -50,6 +50,9 @@ export interface RegistrationRow {
   marketing_opt_in: number;
   idempotency_key: string | null;
   notes: string | null;
+  /** Random revision written by every self-service edit (null = never edited). */
+  edit_rev: string | null;
+  updated_at: string | null;
 }
 
 export interface ParticipantRow {
@@ -57,8 +60,8 @@ export interface ParticipantRow {
   registration_id: string;
   position: number;
   full_name: string;
-  birth_year: number;
-  gender: "male" | "female" | null;
+  age_group: "anak" | "remaja" | "dewasa";
+  gender: "laki-laki" | "perempuan" | null;
   status: "accepted" | "pending_payment" | "expired" | "rejected";
   qr_token: string | null;
   checked_in_at: string | null;
