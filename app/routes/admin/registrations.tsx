@@ -25,12 +25,15 @@ import { getAppEnv } from "~/lib/env.server";
 import { formatDateTime, formatEuro, PAYMENT_STATUS_LABEL } from "~/lib/format";
 import type { RegistrationListRow } from "~/lib/admin.server";
 
+const DEFAULT_STATUS = "actionable";
+
 function filtersFrom(url: URL): RegistrationFilters {
   const p = url.searchParams;
   return {
     q: p.get("q") ?? "",
     email: p.get("email") ?? "",
-    status: p.get("status") ?? "",
+    // No `status` in the URL = the work queue ("Perlu diproses"); an explicit empty `status=` = all statuses.
+    status: p.has("status") ? (p.get("status") ?? "") : DEFAULT_STATUS,
     member: (p.get("member") ?? "") as RegistrationFilters["member"],
     source: (p.get("source") ?? "") as RegistrationFilters["source"],
     page: Number(p.get("page") ?? 1) || 1,
@@ -162,6 +165,7 @@ function RowActions({ r }: { r: RegistrationListRow }) {
 }
 
 const STATUS_OPTIONS: SelectOption[] = [
+  { value: DEFAULT_STATUS, label: "Perlu diproses" },
   { value: "", label: "Semua status" },
   { value: "accepted", label: "Diterima" },
   { value: "pending_payment", label: "Menunggu pembayaran" },
@@ -185,11 +189,11 @@ const SOURCE_OPTIONS: SelectOption[] = [
 ];
 
 function FilterForm({ filters }: { filters: RegistrationFilters }) {
-  const [status, setStatus] = useState(filters.status ?? "");
+  const [status, setStatus] = useState(filters.status ?? DEFAULT_STATUS);
   const [member, setMember] = useState<string>(filters.member ?? "");
   const [source, setSource] = useState<string>(filters.source ?? "");
   const [email, setEmail] = useState<string>(filters.email ?? "");
-  const active = !!(filters.q || filters.status || filters.member || filters.source || filters.email);
+  const active = !!(filters.q || filters.status !== DEFAULT_STATUS || filters.member || filters.source || filters.email);
 
   return (
     <Form
@@ -237,6 +241,7 @@ export default function Registrations({ loaderData }: Route.ComponentProps) {
   };
   const exportParams = new URLSearchParams(params);
   exportParams.delete("page");
+  exportParams.set("status", filters.status ?? ""); // the CSV follows what is on screen, including the default queue
 
   return (
     <div>
@@ -261,7 +266,11 @@ export default function Registrations({ loaderData }: Route.ComponentProps) {
         <FilterForm key={params.toString()} filters={filters} />
 
         {rows.length === 0 ? (
-          <EmptyState icon={MagnifyingGlassIcon}>Tidak ada data.</EmptyState>
+          <EmptyState icon={MagnifyingGlassIcon}>
+            {filters.status === DEFAULT_STATUS && !filters.q && !filters.member && !filters.source && !filters.email
+              ? "Tidak ada pendaftaran yang perlu diproses. Pilih “Semua status” untuk melihat semuanya."
+              : "Tidak ada data."}
+          </EmptyState>
         ) : (
           <>
             {/* Mobile: list */}

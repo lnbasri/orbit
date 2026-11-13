@@ -254,7 +254,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
             </ReviewRow>
             {stats.unsentEmails > 0 ? (
               <ReviewRow
-                to="/admin/registrations?email=unsent"
+                to="/admin/registrations?email=unsent&status="
                 icon={EnvelopeIcon}
                 count={stats.unsentEmails}
                 alert

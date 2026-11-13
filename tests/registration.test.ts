@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { listRegistrations } from "../app/lib/admin.server";
 import { getParticipants, getRegistration, type EventRow } from "../app/lib/db.server";
 import { deliverEmail, type Attachment } from "../app/lib/email/send.server";
 import { TICKET_TOKEN_PATTERN } from "../app/lib/ids";
@@ -307,5 +308,33 @@ describe("revive and delete", () => {
     await db.prepare("UPDATE participants SET checked_in_at = ? WHERE registration_id = ?").bind(hours(1).toISOString(), b.registrationId).run();
     expect((await deleteRegistration(db, b.registrationId, "admin@test", hours(2))).ok).toBe(false);
     expect(await getRegistration(db, b.registrationId)).not.toBeNull();
+  });
+});
+
+describe("admin work queue (status = actionable)", () => {
+  it("lists pending payments first, then unvalidated members, oldest first; hides processed and expired", async () => {
+    const m1 = await registerOnline(db, event, input({ registrantName: "Member Satu" }), opts(T0));
+    const n1 = await registerOnline(db, event, input({ registrantName: "Bayar Satu", membership: "Tidak" }), opts(hours(1)));
+    const m2 = await registerOnline(db, event, input({ registrantName: "Member Dua" }), opts(hours(2)));
+    const n2 = await registerOnline(db, event, input({ registrantName: "Bayar Dua", membership: "Tidak" }), opts(hours(3)));
+    const m3 = await registerOnline(db, event, input({ registrantName: "Member Verified" }), opts(hours(4)));
+    const n3 = await registerOnline(db, event, input({ registrantName: "Sudah Lunas", membership: "Tidak" }), opts(hours(5)));
+    for (const r of [m1, n1, m2, n2, m3, n3]) if (r.kind !== "accepted" && r.kind !== "pending_payment") throw new Error(r.kind);
+    const id = (r: unknown) => (r as { registrationId: string }).registrationId;
+    await setMembershipVerified(db, id(m3), "admin@test", true, hours(6));
+    await confirmPayment(db, id(n3), "admin@test", hours(6));
+
+    const now = hours(6); // all pending ones are still inside their 6 h deadline
+    const queue = await listRegistrations(db, event, { status: "actionable" }, now);
+    expect(queue.rows.map((r) => r.registrant_name)).toEqual(["Bayar Satu", "Bayar Dua", "Member Satu", "Member Dua"]);
+    expect(queue.total).toBe(4);
+    // "" = everything, newest first
+    const all = await listRegistrations(db, event, {}, now);
+    expect(all.total).toBe(6);
+    expect(all.rows[0].registrant_name).toBe("Sudah Lunas");
+
+    // past the pay deadline the pending ones drop out of the queue (they are expired), members stay
+    const late = await listRegistrations(db, event, { status: "actionable" }, hours(24 * 30));
+    expect(late.rows.map((r) => r.registrant_name)).toEqual(["Member Satu", "Member Dua"]);
   });
 });

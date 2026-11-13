@@ -6,6 +6,7 @@ export interface RegistrationFilters {
   q?: string;
   /** "unsent" = the email this registration is waiting for has not gone out (see unsentEmailSql). */
   email?: string;
+  /** Registration status, or "actionable" = needs an admin action (payment to verify, member to validate). "" = all. */
   status?: string;
   member?: "1" | "0" | "";
   source?: "online" | "manual" | "";
@@ -37,6 +38,13 @@ export function unsentEmailSql(cutIso: string) {
   };
 }
 
+/**
+ * Records that wait for an admin: a pending payment inside its deadline, or an accepted member that is not validated yet.
+ * Same predicates as the row buttons in routes/admin/registrations.tsx. One bind: now.
+ */
+const ACTIONABLE_SQL = `((r.status = 'pending_payment' AND r.payment_status = 'pending' AND r.pay_deadline > ?)
+    OR (r.is_member = 1 AND r.status = 'accepted' AND r.membership_verified_at IS NULL))`;
+
 function whereClause(eventId: number, f: RegistrationFilters, nowIso: string) {
   const where: string[] = ["r.event_id = ?"];
   const binds: unknown[] = [eventId];
@@ -48,7 +56,10 @@ function whereClause(eventId: number, f: RegistrationFilters, nowIso: string) {
     const like = `%${f.q.trim()}%`;
     binds.push(like, like, like, like, like);
   }
-  if (f.status) {
+  if (f.status === "actionable") {
+    where.push(ACTIONABLE_SQL);
+    binds.push(nowIso);
+  } else if (f.status) {
     where.push(`${EFFECTIVE_STATUS_SQL} = ?`);
     binds.push(nowIso, f.status);
   }
@@ -74,13 +85,18 @@ export async function listRegistrations(db: D1Database, event: EventRow, f: Regi
   const nowIso = now.toISOString();
   const { sql, binds } = whereClause(event.id, f, nowIso);
   const page = Math.max(1, f.page ?? 1);
+  // Work queue: payments first, then member validations, oldest first. Everything else: newest first.
+  const order =
+    f.status === "actionable"
+      ? "CASE WHEN r.status = 'pending_payment' THEN 0 ELSE 1 END, r.created_at ASC"
+      : "r.created_at DESC";
   const [{ results }, count] = await Promise.all([
     db
       .prepare(
         `SELECT r.*, ${EFFECTIVE_STATUS_SQL} AS effective_status,
            (SELECT COUNT(*) FROM participants p WHERE p.registration_id = r.id AND p.checked_in_at IS NOT NULL) AS checked_in
          FROM registrations r WHERE ${sql}
-         ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
+         ORDER BY ${order} LIMIT ? OFFSET ?`,
       )
       .bind(nowIso, ...binds, PAGE_SIZE, (page - 1) * PAGE_SIZE)
       .all<RegistrationListRow>(),
