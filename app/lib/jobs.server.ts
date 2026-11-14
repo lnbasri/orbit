@@ -1,3 +1,4 @@
+import { anonymiseCheckinData } from "./checkin.server";
 import { auditStatement } from "./db.server";
 import { MAX_EMAIL_ATTEMPTS, deliverEmail, type EmailConfig, type EmailKind } from "./email/send.server";
 
@@ -7,6 +8,8 @@ export interface JobReport {
   retried: number;
   /** QR emails left for the next run because this run reached its QR budget. */
   deferred: number;
+  /** Check-in log rows anonymised (event end + 30 days); only present when something happened. */
+  anonymised?: number;
 }
 
 /**
@@ -137,6 +140,10 @@ export async function runDeadlineJob(db: D1Database, cfg: EmailConfig, now = new
     const r = await deliverEmail(db, cfg, row.registration_id, row.kind, { now });
     if (r.ok && !r.skipped) report.retried++;
   }
+
+  // Retention: the check-in log loses who/where 30 days after the event (idempotent, one cheap query otherwise).
+  const anonymised = await anonymiseCheckinData(db, now);
+  if (anonymised > 0) report.anonymised = anonymised;
 
   return report;
 }

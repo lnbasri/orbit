@@ -200,6 +200,13 @@ export async function rejectMembership(
       )
       .bind(nowIso, registrationId),
     db
+      .prepare(
+        `INSERT OR IGNORE INTO revoked_tickets (code, event_id, reason, revoked_at)
+         SELECT p.qr_token, r.event_id, 'membership_rejected', ? FROM participants p JOIN registrations r ON r.id = p.registration_id
+         WHERE p.registration_id = ? AND p.qr_token IS NOT NULL AND ${rejected}`,
+      )
+      .bind(nowIso, registrationId, registrationId, nowIso),
+    db
       .prepare(`UPDATE participants SET status = 'rejected', qr_token = NULL WHERE registration_id = ? AND ${rejected}`)
       .bind(registrationId, registrationId, nowIso),
     db
@@ -244,6 +251,13 @@ export async function deleteRegistration(
            AND NOT EXISTS (SELECT 1 FROM participants WHERE registration_id = ? AND checked_in_at IS NOT NULL)`,
       )
       .bind(nowIso, actor, registrationId, detail, registrationId, registrationId),
+    // Remember the ticket codes (scanners then see "ticket cancelled" instead of "unknown"); same batch, gated on the audit row.
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO revoked_tickets (code, event_id, reason, revoked_at)
+         SELECT p.qr_token, ?, 'admin_deleted', ? FROM participants p WHERE p.registration_id = ? AND p.qr_token IS NOT NULL AND ${logged}`,
+      )
+      .bind(reg.event_id, nowIso, registrationId, nowIso, actor, registrationId),
     db.prepare(`DELETE FROM participants WHERE registration_id = ? AND ${logged}`).bind(registrationId, nowIso, actor, registrationId),
     db.prepare(`DELETE FROM email_log WHERE registration_id = ? AND ${logged}`).bind(registrationId, nowIso, actor, registrationId),
     db.prepare(`DELETE FROM dev_outbox WHERE registration_id = ? AND ${logged}`).bind(registrationId, nowIso, actor, registrationId),

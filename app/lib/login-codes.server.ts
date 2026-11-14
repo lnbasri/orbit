@@ -2,6 +2,7 @@ import { normalizeEmail } from "./admins.server";
 import { sha256Hex, timingSafeEqual, type RequestMeta } from "./auth.server";
 import { auditStatement } from "./db.server";
 import { loginCodeEmail } from "./email/login-code";
+import { scannerLoginCodeEmail } from "./email/scanner-login";
 import { sendDirectEmail, type EmailConfig } from "./email/send.server";
 
 /**
@@ -12,6 +13,16 @@ import { sendDirectEmail, type EmailConfig } from "./email/send.server";
  *    bypass it (same pattern as the quota check).
  *  - Unknown emails get the same answer as admins and no email (no admin enumeration).
  */
+/**
+ * Two logins share this mechanism with separate tables: the admin dashboard (`admins`) and the scanner app
+ * (`scanners`, active only). The table names below are constants, never user input.
+ */
+export type LoginRealm = "admin" | "scanner";
+const REALM_SQL: Record<LoginRealm, { codes: string; member: string }> = {
+  admin: { codes: "admin_login_codes", member: "SELECT 1 FROM admins WHERE email = ?1" },
+  scanner: { codes: "scanner_login_codes", member: "SELECT 1 FROM scanners WHERE email = ?1 AND active = 1" },
+};
+
 export const CODE_TTL_MS = 10 * 60_000;
 export const CODE_MAX_ATTEMPTS = 5;
 export const CODE_COOLDOWN_MS = 60_000;
@@ -49,7 +60,9 @@ export async function requestLoginCode(
   emailRaw: string,
   meta: RequestMeta & { appOrigin: string },
   now = new Date(),
+  realm: LoginRealm = "admin",
 ): Promise<RequestCodeResult> {
+  const tables = REALM_SQL[realm];
   const email = normalizeEmail(emailRaw);
   if (!isValidEmail(email)) return { status: "skipped" };
 
@@ -60,11 +73,11 @@ export async function requestLoginCode(
 
   const row = await db
     .prepare(
-      `INSERT INTO admin_login_codes (email, code_hash, salt, created_at, expires_at, ip)
+      `INSERT INTO ${tables.codes} (email, code_hash, salt, created_at, expires_at, ip)
        SELECT ?1, ?2, ?3, ?4, ?5, ?6
-       WHERE EXISTS (SELECT 1 FROM admins WHERE email = ?1)
-         AND NOT EXISTS (SELECT 1 FROM admin_login_codes WHERE email = ?1 AND created_at > ?7)
-         AND (SELECT COUNT(*) FROM admin_login_codes WHERE email = ?1 AND created_at > ?8) < ?9
+       WHERE EXISTS (${tables.member})
+         AND NOT EXISTS (SELECT 1 FROM ${tables.codes} WHERE email = ?1 AND created_at > ?7)
+         AND (SELECT COUNT(*) FROM ${tables.codes} WHERE email = ?1 AND created_at > ?8) < ?9
        RETURNING id`,
     )
     .bind(
@@ -81,7 +94,18 @@ export async function requestLoginCode(
     .first<{ id: number }>();
   if (!row) return { status: "skipped" };
 
-  const { subject, html, text } = loginCodeEmail({
+  const { subject, html, text } =
+    realm === "scanner"
+      ? scannerLoginCodeEmail({
+          code,
+          email,
+          requestedAt: nowIso,
+          expiresAt,
+          validMinutes: CODE_TTL_MS / 60_000,
+          appOrigin: meta.appOrigin,
+          userAgent: meta.userAgent,
+        })
+      : loginCodeEmail({
     code,
     email,
     requestedAt: nowIso,
@@ -95,14 +119,14 @@ export async function requestLoginCode(
 
   try {
     await sendDirectEmail(db, cfg, { to: email, subject, html, text, attachments: [] }, {
-      kind: "login_code",
+      kind: realm === "scanner" ? "scanner_login_code" : "login_code",
       idempotencyKey: `login-code:${row.id}:${salt}`,
     });
   } catch (err) {
     const error = String((err as Error)?.message ?? err).slice(0, 300);
     // Drop the undelivered code so the cooldown does not block an immediate retry.
     await db.batch([
-      db.prepare("DELETE FROM admin_login_codes WHERE id = ?").bind(row.id),
+      db.prepare(`DELETE FROM ${tables.codes} WHERE id = ?`).bind(row.id),
       auditStatement(db, email, "auth.code_failed", null, { error }, nowIso),
     ]);
     console.error(`login code for ${email} failed: ${error}`);
@@ -114,7 +138,8 @@ export async function requestLoginCode(
   return { status: "sent", codeId: row.id };
 }
 
-export type VerifyCodeResult = { ok: true } | { ok: false; message: string };
+/** `code` is a stable machine-readable reason (the scanner app shows its own Indonesian/Dutch texts for it). */
+export type VerifyCodeResult = { ok: true } | { ok: false; message: string; code?: "format" | "invalid" | "locked" };
 
 const INVALID = "Kode salah atau sudah kedaluwarsa. Periksa kembali, atau minta kode baru.";
 
@@ -127,35 +152,37 @@ export async function verifyLoginCode(
   emailRaw: string,
   codeRaw: string,
   now = new Date(),
+  realm: LoginRealm = "admin",
 ): Promise<VerifyCodeResult> {
+  const table = REALM_SQL[realm].codes;
   const email = normalizeEmail(emailRaw);
   const code = normalizeCode(codeRaw);
-  if (!code) return { ok: false, message: "Masukkan 6 digit kode dari email." };
+  if (!code) return { ok: false, message: "Masukkan 6 digit kode dari email.", code: "format" };
   const nowIso = now.toISOString();
 
   const row = await db
     .prepare(
-      `UPDATE admin_login_codes SET attempts = attempts + 1
-       WHERE id = (SELECT id FROM admin_login_codes WHERE email = ? ORDER BY id DESC LIMIT 1)
+      `UPDATE ${table} SET attempts = attempts + 1
+       WHERE id = (SELECT id FROM ${table} WHERE email = ? ORDER BY id DESC LIMIT 1)
          AND used_at IS NULL AND expires_at > ? AND attempts < ?
        RETURNING id, code_hash, salt, attempts`,
     )
     .bind(email, nowIso, CODE_MAX_ATTEMPTS)
     .first<{ id: number; code_hash: string; salt: string; attempts: number }>();
-  if (!row) return { ok: false, message: INVALID };
+  if (!row) return { ok: false, message: INVALID, code: "invalid" };
 
   if (!timingSafeEqual(await hashCode(row.salt, code), row.code_hash)) {
     if (row.attempts >= CODE_MAX_ATTEMPTS) {
       await auditStatement(db, email, "auth.code_locked", null, undefined, nowIso).run();
-      return { ok: false, message: "Terlalu banyak percobaan. Minta kode baru untuk masuk." };
+      return { ok: false, message: "Terlalu banyak percobaan. Minta kode baru untuk masuk.", code: "locked" };
     }
-    return { ok: false, message: INVALID };
+    return { ok: false, message: INVALID, code: "invalid" };
   }
 
   const used = await db
-    .prepare("UPDATE admin_login_codes SET used_at = ? WHERE id = ? AND used_at IS NULL")
+    .prepare(`UPDATE ${table} SET used_at = ? WHERE id = ? AND used_at IS NULL`)
     .bind(nowIso, row.id)
     .run();
-  if ((used.meta.changes ?? 0) !== 1) return { ok: false, message: INVALID };
+  if ((used.meta.changes ?? 0) !== 1) return { ok: false, message: INVALID, code: "invalid" };
   return { ok: true };
 }

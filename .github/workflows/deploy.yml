@@ -71,7 +71,7 @@ jobs:
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "Set the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets."; exit 1
           fi
-          echo "Deploying target: $TARGET and $TARGET-admin"
+          echo "Deploying target: $TARGET, $TARGET-admin and $TARGET-checkin"
 
       # Idempotent: only applies migrations not yet recorded. Both Workers of a target share this one database.
       - name: Apply D1 migrations
@@ -82,3 +82,7 @@ jobs:
 
       - name: Deploy admin Worker
         run: node scripts/deploy.mjs "$TARGET-admin"
+
+      # The scanner app. Production has no custom domain in wrangler.jsonc: it is attached by hand, a deploy never exposes it.
+      - name: Deploy check-in Worker
+        run: node scripts/deploy.mjs "$TARGET-checkin"

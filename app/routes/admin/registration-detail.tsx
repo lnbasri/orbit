@@ -15,6 +15,7 @@ import {
   EyeSlashIcon,
   IdentificationIcon,
   PaperAirplaneIcon,
+  QrCodeIcon,
   QueueListIcon,
   UserIcon,
   UsersIcon,
@@ -312,6 +313,39 @@ export default function RegistrationDetail({ loaderData }: Route.ComponentProps)
                     <span className="text-slate-400">belum check-in</span>
                   )}
                 </span>
+                {p.qr_token && p.status === "accepted" ? (
+                  p.checked_in_at ? (
+                    <ActionButton
+                      intent="admin-undo-checkin"
+                      label="Batalkan check-in"
+                      tone="neutral"
+                      icon={ArrowUturnLeftIcon}
+                      extra={{ participantId: p.id }}
+                      confirm={{
+                        title: "Batalkan check-in",
+                        description: `${p.full_name} ditandai belum masuk lagi. Tindakan dicatat di log.`,
+                        confirmLabel: "Ya, batalkan",
+                        tone: "danger",
+                        icon: ArrowUturnLeftIcon,
+                      }}
+                    />
+                  ) : (
+                    <ActionButton
+                      intent="admin-checkin"
+                      label="Check-in manual"
+                      tone="neutral"
+                      icon={QrCodeIcon}
+                      extra={{ participantId: p.id }}
+                      confirm={{
+                        title: "Check-in manual",
+                        description: `${p.full_name} ditandai sudah masuk (misalnya QR hilang). Tindakan dicatat di log.`,
+                        confirmLabel: "Ya, check-in",
+                        tone: "info",
+                        icon: QrCodeIcon,
+                      }}
+                    />
+                  )
+                ) : null}
               </li>
             ))}
           </ul>

@@ -26,6 +26,11 @@ export interface EventRow {
   location_map_url: string | null;
   /** 1 = registrants may add NEW participants in "Pendaftaran Saya" (default 0, quota control). */
   self_add_allowed: number;
+  /** Check-in kill switch (1 = scanners may admit people). */
+  checkin_enabled: number;
+  /** Optional override of the check-in gate (UTC ISO). NULL = 1 h before start .. 1 h after end. */
+  checkin_opens_at: string | null;
+  checkin_closes_at: string | null;
   status: "draft" | "open" | "closed";
 }
 

@@ -9,6 +9,9 @@
  *   production        `ppme-event`        public form on event.ppmedenhaag.nl (custom domain), ENABLE_ADMIN=false, cron, its own NEW clean D1 `ppme-registration-prod`
  *   production-admin  `ppme-event-admin`  admin + later the scanner on event-admin.ppmedenhaag.nl (custom domain), ENABLE_PUBLIC=false, no cron,
  *                     app login, same new D1. (Config added 13 Nov; not deployed until secrets are set.) See docs/deploy-runbook.md (Track 2) and docs/dns-migration-todo.md.
+ *   test-checkin        TEMPORARY scanner app `ppme-registration-checkin` on workers.dev (/scan only), same D1 as `test`
+ *   production-checkin  `ppme-event-checkin`: the D-day scanner app (/scan only) for event-checkin.ppmedenhaag.nl, same D1 as `production`.
+ *                       The custom domain is attached by hand (see the block below). See docs/scanner-plan.md.
  * Admin login is the app's own (no Cloudflare Access): a 6-digit PIN by email via Resend, optionally Google sign-in
  * (set GOOGLE_CLIENT_ID below + `wrangler secret put GOOGLE_CLIENT_SECRET --env <admin env>`); sessions last 24 h.
  * Secrets are per Worker: wrangler secret put <NAME> --env <env>   (test: TURNSTILE_SECRET + RESEND_API_KEY; test-admin: TURNSTILE_SECRET + RESEND_API_KEY [+ GOOGLE_CLIENT_SECRET])
@@ -178,6 +181,79 @@
 				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
 				"PUBLIC_APP_URL": "https://event.ppmedenhaag.nl",
 				"ENABLE_PUBLIC": "false",
+				"TURNSTILE_SITE_KEY": "0x4AAAAAAF9STdC9uclCsE_i",
+				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
+				"BANK_IBAN": "NL26 INGB 0002 1661 44",
+				"EMAIL_MODE": "resend",
+				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <event@ppmedenhaag.nl>",
+				"EMAIL_REPLY_TO": "event@ppmedenhaag.nl",
+				"ADMIN_EMAILS": "",
+				"GOOGLE_CLIENT_ID": ""
+			}
+		},
+
+		// ---- TEST-CHECKIN: the scanner app (/scan) only, on its own workers.dev address. Same database as `test`.
+		// Sends login-code emails (RESEND_API_KEY) and verifies Turnstile (TURNSTILE_SECRET): both are per-Worker secrets.
+		"test-checkin": {
+			"name": "ppme-registration-checkin",
+			"workers_dev": true,
+			"preview_urls": false,
+			"triggers": { "crons": [] },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "ppme-registration",
+					"database_id": "8f86ce98-349d-4445-8cf5-4b0c9fa55287",
+					"migrations_dir": "migrations"
+				}
+			],
+			"vars": {
+				"APP_ENV": "production",
+				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
+				"PUBLIC_APP_URL": "https://ppme-registration.ppme-registration.workers.dev",
+				// This Worker serves ONLY the check-in app: no public form, no /admin (404s). The scanner app fails closed unless ENABLE_CHECKIN is "true".
+				"ENABLE_PUBLIC": "false",
+				"ENABLE_ADMIN": "false",
+				"ENABLE_CHECKIN": "true",
+				// Turnstile on the login form (code requests). The widget's hostname list must include this Worker's hostname.
+				"TURNSTILE_SITE_KEY": "0x4AAAAAAF9STdC9uclCsE_i",
+				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
+				"BANK_IBAN": "NL26 INGB 0002 1661 44",
+				"EMAIL_MODE": "resend",
+				"EMAIL_FROM": "Panitia Kajian PPME Den Haag <event@ppmedenhaag.nl>",
+				"EMAIL_REPLY_TO": "event@ppmedenhaag.nl",
+				"ADMIN_EMAILS": "",
+				"GOOGLE_CLIENT_ID": ""
+			}
+		},
+
+		// ---- PRODUCTION-CHECKIN: the scanner app for D-day, same D1 as `production`, no cron.
+		// Intended host: https://event-checkin.ppmedenhaag.nl. The custom domain is attached by hand (dashboard: Workers > ppme-event-checkin >
+		// Settings > Domains & Routes), NOT by this file, so nothing is exposed before the Turnstile hostname and the secrets are in place.
+		// Once it exists, add this line below so later deploys keep it:  "routes": [{ "pattern": "event-checkin.ppmedenhaag.nl", "custom_domain": true }],
+		// Secrets (wrangler secret put <NAME> --env production-checkin): TURNSTILE_SECRET, RESEND_API_KEY.
+		"production-checkin": {
+			"name": "ppme-event-checkin",
+			"workers_dev": false,
+			"preview_urls": false,
+			"triggers": { "crons": [] },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "ppme-registration-prod",
+					"database_id": "9f91edd2-862f-47ef-831f-49a1b43fae4e",
+					"migrations_dir": "migrations"
+				}
+			],
+			"vars": {
+				"APP_ENV": "production",
+				"DEFAULT_EVENT_SLUG": "kajian-aisah-dahlan-2026",
+				"PUBLIC_APP_URL": "https://event.ppmedenhaag.nl",
+				// This Worker serves ONLY the check-in app: no public form, no /admin (404s). The scanner app fails closed unless ENABLE_CHECKIN is "true".
+				"ENABLE_PUBLIC": "false",
+				"ENABLE_ADMIN": "false",
+				"ENABLE_CHECKIN": "true",
+				// Turnstile on the login form (code requests). The widget's hostname list must include this Worker's hostname.
 				"TURNSTILE_SITE_KEY": "0x4AAAAAAF9STdC9uclCsE_i",
 				"BANK_ACCOUNT_NAME": "VERENIGING PPME",
 				"BANK_IBAN": "NL26 INGB 0002 1661 44",
