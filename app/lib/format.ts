@@ -60,7 +60,7 @@ export function daysUntil(targetIso: string, now: Date, tz = EVENT_TZ): number {
 }
 
 /**
- * Hijri (Umm al-Qura) date of an instant in the event time zone, e.g. "25 Jumadil Akhir 1448 H".
+ * Hijri (Umm al-Qura) date of an instant in the event time zone, e.g. "25 Jumadil Akhir 1448".
  * Computed by ICU, so call it on the server and pass the string down (keeps SSR hydration deterministic).
  */
 const HIJRI_MONTHS = [
@@ -78,7 +78,7 @@ export function formatHijriDate(iso: string, tz = EVENT_TZ): string {
   }).formatToParts(d);
   const n = (t: string) => Number(parts.find((p) => p.type === t)?.value);
   const month = HIJRI_MONTHS[n("month") - 1];
-  return month ? `${n("day")} ${month} ${n("year")} H` : "";
+  return month ? `${n("day")} ${month} ${n("year")}` : "";
 }
 
 export const REGISTRATION_STATUS_LABEL: Record<string, string> = {
