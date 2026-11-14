@@ -321,7 +321,23 @@ describe("add to calendar", () => {
     starts_at: "2026-12-05T08:00:00.000Z",
     ends_at: "2026-12-05T13:30:00.000Z",
     info_url: null,
+    location_name: "Masjid Al Hikmah",
+    location_address: "Medlerstraat 4, 2531 HA Den Haag",
+    location_map_url: "https://maps.app.goo.gl/7nLnjw15QhfiC6tA7",
   };
+
+  it("puts the location in the .ics (escaped), the description and both web links", () => {
+    const ics = buildIcs(ev, new Date("2026-11-20T10:00:00.000Z")).replace(/\r\n /g, "");
+    expect(ics).toContain(String.raw`LOCATION:Masjid Al Hikmah\, Medlerstraat 4\, 2531 HA Den Haag`);
+    expect(ics).toContain("Peta: https://maps.app.goo.gl/7nLnjw15QhfiC6tA7");
+    const { google, outlook } = calendarLinks(ev);
+    expect(new URL(google).searchParams.get("location")).toBe("Masjid Al Hikmah, Medlerstraat 4, 2531 HA Den Haag");
+    expect(new URL(outlook).searchParams.get("location")).toBe("Masjid Al Hikmah, Medlerstraat 4, 2531 HA Den Haag");
+    // no location set: no LOCATION line, no location parameter
+    const none = { ...ev, location_name: null, location_address: null, location_map_url: null };
+    expect(buildIcs(none)).not.toContain("LOCATION:");
+    expect(new URL(calendarLinks(none).google).searchParams.has("location")).toBe(false);
+  });
 
   it("builds a valid, escaped, folded .ics with UTC times and a stable UID", () => {
     const ics = buildIcs(ev, new Date("2026-11-20T10:00:00.000Z"));

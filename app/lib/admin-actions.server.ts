@@ -1,5 +1,5 @@
 import { addAdmin, removeAdmin } from "./admins.server";
-import { updateEventDetails, updateEventTimes, updateEventPrice, updateQuotas, updateRegistrationWindow } from "./events.server";
+import { updateEventDetails, updateEventLocation, updateEventTimes, updateEventPrice, updateQuotas, updateRegistrationWindow } from "./events.server";
 import { emailConfig, type AppEnv } from "./config.server";
 import { audit, getEventBySlug } from "./db.server";
 import { deliverEmail, type EmailKind } from "./email/send.server";
@@ -82,6 +82,18 @@ export async function handleAdminIntent(env: AppEnv, actor: string, form: FormDa
       const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");
       if (!event) return { ok: false, message: "Acara tidak ditemukan." };
       return updateEventDetails(env.DB, actor, event.id, String(form.get("speaker") ?? ""), String(form.get("theme") ?? ""));
+    }
+    case "save-event-location": {
+      const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");
+      if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+      return updateEventLocation(
+        env.DB,
+        actor,
+        event.id,
+        String(form.get("locationName") ?? ""),
+        String(form.get("locationAddress") ?? ""),
+        String(form.get("locationMapUrl") ?? ""),
+      );
     }
     case "save-event-price": {
       const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");

@@ -7,14 +7,16 @@ export function EventDetailRow({
   label,
   value,
   sub,
+  className = "",
 }: {
   icon: IconComponent;
   label: string;
   value: ReactNode;
   sub?: ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="bg-white/90 px-5 py-4 sm:px-8 sm:py-5 lg:px-6 lg:first:pl-10 xl:py-6">
+    <div className={`bg-white/90 px-5 py-4 sm:px-8 sm:py-5 lg:px-6 lg:first:pl-10 xl:py-6 ${className}`}>
       <dt className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.14em] text-slate-500 uppercase">
         <Icon className="size-4 text-brand" aria-hidden="true" />
         {label}

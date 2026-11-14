@@ -41,14 +41,16 @@ export const bullets = (items: string[]) =>
  * Label above value, rows separated by thin lines (values are escaped). Stacked on purpose, in ONE cell per row:
  * a two-column table wastes a third of a phone screen and needs a media query to stack.
  */
-export const detailTable = (rows: [string, string][]) =>
+/** A detail value is plain text (escaped) or `{ html }` for pre-escaped markup such as a link. */
+export type DetailValue = string | { html: string };
+export const detailTable = (rows: [string, DetailValue][]) =>
   `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${rows
     .map(([label, value], i) => {
       const border = i === rows.length - 1 ? "" : "border-bottom:1px solid #E2E8F0;";
       return (
         `<tr><td style="padding:10px 0;${border}font-family:${FONT};">` +
         `<span style="display:block;font-size:12px;line-height:18px;color:#64748B;">${escapeHtml(label)}</span>` +
-        `<span style="display:block;font-size:14px;line-height:22px;color:#0F172A;font-weight:600;">${escapeHtml(value)}</span>` +
+        `<span style="display:block;font-size:14px;line-height:22px;color:#0F172A;font-weight:600;">${typeof value === "string" ? escapeHtml(value) : value.html}</span>` +
         `</td></tr>`
       );
     })

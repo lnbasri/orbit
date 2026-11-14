@@ -21,6 +21,9 @@ export interface EventRow {
   payment_counter: number;
   privacy_version: string;
   info_url: string | null;
+  location_name: string | null;
+  location_address: string | null;
+  location_map_url: string | null;
   status: "draft" | "open" | "closed";
 }
 

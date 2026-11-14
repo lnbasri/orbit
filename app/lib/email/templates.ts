@@ -2,6 +2,7 @@
 // Layout and building blocks live in ./layout (same look as the login-code email).
 import { formatDateTime, formatEuro, formatHijriDate, formatLongDate, formatTime } from "../format";
 import { registrationRules } from "../rules";
+import { locationText } from "./calendar";
 import {
   BRAND,
   FONT,
@@ -10,6 +11,7 @@ import {
   callout,
   codePanel,
   detailTable,
+  type DetailValue,
   emailShell,
   escapeHtml,
   heading,
@@ -27,6 +29,9 @@ export interface EventInfo {
   theme: string | null;
   starts_at: string;
   ends_at: string;
+  location_name?: string | null;
+  location_address?: string | null;
+  location_map_url?: string | null;
   max_family: number;
   price_non_member_cents: number;
   pay_window_min: number;
@@ -128,6 +133,16 @@ const eventDate = (e: EventInfo) => {
   return `${formatLongDate(e.starts_at)}${hijri ? ` (${hijri})` : ""}, ${formatTime(e.starts_at)}–${formatTime(e.ends_at)} waktu Belanda`;
 };
 
+/** "Lokasi" row of the event info table: name + address, with the map link underneath when there is one. */
+function locationRow(e: EventInfo): [string, DetailValue][] {
+  const text = locationText(e);
+  if (!text) return [];
+  const map = e.location_map_url
+    ? `<br><a href="${escapeHtml(e.location_map_url)}" target="_blank" style="color:${BRAND};font-weight:600;font-size:13px;">Buka di Google Maps</a>`
+    : "";
+  return [["Lokasi", { html: `${escapeHtml(text)}${map}` }]];
+}
+
 const greeting = (name: string) => para(`Yth. ${escapeHtml(name)},`, "0 0 12px 0");
 
 export function confirmationEmail(
@@ -157,10 +172,11 @@ export function confirmationEmail(
     )
     .join("");
 
-  const info: [string, string][] = [
+  const info: [string, DetailValue][] = [
     ["Acara", `${event.title}${event.speaker ? " bersama " + event.speaker : ""}`],
     ...(event.theme ? ([["Tema", event.theme]] as [string, string][]) : []),
     ["Hari/Tanggal", eventDate(event)],
+    ...locationRow(event),
     ["Jumlah peserta", `${participants.length} orang`],
     ["Penyelenggara", "Panitia Kajian PPME Den Haag"],
   ];
@@ -370,9 +386,10 @@ export function membershipPendingEmail(
   } & Common,
 ) {
   const { event, registrantName, people, manage, contact, origin } = args;
-  const info: [string, string][] = [
+  const info: [string, DetailValue][] = [
     ["Acara", `${event.title}${event.speaker ? " bersama " + event.speaker : ""}`],
     ["Hari/Tanggal", eventDate(event)],
+    ...locationRow(event),
     ["Jumlah peserta", `${people} orang`],
     ["Keanggotaan", "Anggota PPME Den Haag (menunggu validasi panitia)"],
   ];

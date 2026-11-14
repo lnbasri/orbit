@@ -10,6 +10,7 @@ import {
   InformationCircleIcon,
   LockClosedIcon,
   LockOpenIcon,
+  MapPinIcon,
   MicrophoneIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -40,6 +41,9 @@ export async function loader() {
     title: event.title,
     speaker: event.speaker ?? "",
     theme: event.theme ?? "",
+    locationName: event.location_name ?? "",
+    locationAddress: event.location_address ?? "",
+    locationMapUrl: event.location_map_url ?? "",
     startsAt: event.starts_at,
     startsAtLocal: utcIsoToLocalInput(event.starts_at),
     endsAtLocal: utcIsoToLocalInput(event.ends_at),
@@ -57,12 +61,14 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { title, speaker, theme, startsAt, startsAtLocal, endsAtLocal, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota } = loaderData;
+  const { title, speaker, theme, locationName, locationAddress, locationMapUrl, startsAt, startsAtLocal, endsAtLocal, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota } = loaderData;
   const fetcher = useFetcher<{ ok: boolean; message: string }>();
   const timesFetcher = useFetcher<{ ok: boolean; message: string }>();
   const timesBusy = timesFetcher.state !== "idle";
   const detailsFetcher = useFetcher<{ ok: boolean; message: string }>();
   const detailsBusy = detailsFetcher.state !== "idle";
+  const locationFetcher = useFetcher<{ ok: boolean; message: string }>();
+  const locationBusy = locationFetcher.state !== "idle";
   const priceFetcher = useFetcher<{ ok: boolean; message: string }>();
   const priceBusy = priceFetcher.state !== "idle";
   const busy = fetcher.state !== "idle";
@@ -165,6 +171,32 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
           <Hint icon={InformationCircleIcon}>
             Tampil di formulir publik dan di email yang dikirim sesudahnya. Kosongkan kolom untuk menyembunyikannya. Email
             yang sudah terkirim tidak berubah.
+          </Hint>
+        </ul>
+      </Panel>
+
+      <Panel title="Lokasi acara" icon={MapPinIcon} className="mt-6">
+        <locationFetcher.Form method="post" className="grid gap-4">
+          <input type="hidden" name="intent" value="save-event-location" />
+          <TextField name="locationName" label="Nama lokasi" defaultValue={locationName} maxLength={120} placeholder="Masjid Al Hikmah" />
+          <TextField name="locationAddress" label="Alamat" defaultValue={locationAddress} maxLength={200} placeholder="Medlerstraat 4, 2531 HA Den Haag" />
+          <TextField name="locationMapUrl" label="Tautan Google Maps" defaultValue={locationMapUrl} maxLength={300} placeholder="https://maps.app.goo.gl/…" />
+          <div>
+            <button type="submit" disabled={locationBusy} className={buttonClass("primary", "md", "w-full sm:w-auto")}>
+              {locationBusy ? <Spinner /> : <CheckCircleIcon className="size-4" aria-hidden="true" />}
+              {locationBusy ? "Menyimpan…" : "Simpan lokasi"}
+            </button>
+            <button type="reset" disabled={locationBusy} className={buttonClass("secondary", "md", "mt-2 w-full sm:mt-0 sm:ml-2 sm:w-auto")}>
+              <ArrowUturnLeftIcon className="size-4" aria-hidden="true" />
+              Reset
+            </button>
+          </div>
+        </locationFetcher.Form>
+        <Notice result={locationFetcher.data} className="mt-4" />
+        <ul className="mt-6 space-y-2 border-t border-slate-100 pt-5 text-xs text-slate-500">
+          <Hint icon={InformationCircleIcon}>
+            Tampil di formulir pendaftaran, email konfirmasi, dan kalender (.ics, Google, Outlook). Kosongkan semua kolom untuk
+            menyembunyikan lokasi. Email yang sudah terkirim tidak berubah.
           </Hint>
         </ul>
       </Panel>

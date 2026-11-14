@@ -6,6 +6,7 @@ import { deliverEmail, type Attachment } from "../app/lib/email/send.server";
 import { TICKET_TOKEN_PATTERN } from "../app/lib/ids";
 import { runDeadlineJob } from "../app/lib/jobs.server";
 import { confirmPayment, deleteRegistration, rejectMembership, setMembershipVerified } from "../app/lib/payments.server";
+import { updateEventLocation } from "../app/lib/events.server";
 import { quotaSummary, registerOnline } from "../app/lib/registration.server";
 import { registrationSchema } from "../app/lib/validation";
 import { T0, decodeQrPng, emailCfg, hours, input, resetDb, startDb } from "./helpers";
@@ -112,6 +113,9 @@ describe("member registration: validate first, then the QR code", () => {
     // The fixed template no longer contains the duplicated list item (B9).
     expect(mail!.html.replace(/href="[^"]*"/g, "").match(/Penyelenggara/g)).toHaveLength(1);
     expect(mail!.html).toContain("Keanggotaan Anda telah divalidasi");
+    // the location (seeded by migration 0015) is in the body with a map link, and in the .ics
+    expect(mail!.html).toContain("Masjid Al Hikmah, Medlerstraat 4, 2531 HA Den Haag");
+    expect(mail!.html).toContain('href="https://maps.app.goo.gl/7nLnjw15QhfiC6tA7"');
     expect(mail!.html).toContain("calendar.google.com/calendar/render");
     expect(mail!.html).toContain("outlook.live.com/calendar/0/deeplink/compose");
     expect(mail!.html).toContain("25 Jumadil Akhir 1448"); // Hijri date of the event day
@@ -120,6 +124,7 @@ describe("member registration: validate first, then the QR code", () => {
     expect(ics!.contentId).toBeUndefined();
     const text = Buffer.from(ics!.contentBase64, "base64").toString("utf8");
     expect(text).toContain("BEGIN:VEVENT");
+    expect(text.replace(/\r\n /g, "")).toContain("LOCATION:Masjid Al Hikmah");
     expect(text).toContain("DTSTART:20261205T080000Z");
     expect(text).toContain("DTEND:20261205T133000Z");
   });
@@ -397,5 +402,23 @@ describe("admin work queue (status = actionable)", () => {
     // past the pay deadline the pending ones drop out of the queue (they are expired), members stay
     const late = await listRegistrations(db, event, { status: "actionable" }, hours(24 * 30));
     expect(late.rows.map((r) => r.registrant_name)).toEqual(["Member Satu", "Member Dua"]);
+  });
+});
+
+describe("event location (admin)", () => {
+  it("is seeded, can be changed, validates the map link and is audited", async () => {
+    expect(event).toMatchObject({ location_name: "Masjid Al Hikmah", location_address: "Medlerstraat 4, 2531 HA Den Haag" });
+    expect(await updateEventLocation(db, "admin@test", event.id, "Masjid Al Hikmah", "Medlerstraat 4, 2531 HA Den Haag", "https://maps.app.goo.gl/7nLnjw15QhfiC6tA7")).toMatchObject({ ok: true, message: "Lokasi tidak berubah." });
+    expect((await updateEventLocation(db, "admin@test", event.id, "Aula", "Jalan 1", "http://insecure.example/x")).ok).toBe(false);
+    expect((await updateEventLocation(db, "admin@test", event.id, "Aula", "Jalan 1", "javascript:alert(1)")).ok).toBe(false);
+    expect((await updateEventLocation(db, "admin@test", event.id, "x".repeat(121), "", "")).ok).toBe(false);
+    expect(await updateEventLocation(db, "admin@test", event.id, "  Aula   Baru ", "Jalan 1", "https://maps.example/abc")).toMatchObject({ ok: true, message: "Lokasi disimpan." });
+    const row = await db.prepare("SELECT location_name, location_address, location_map_url FROM events").first<Record<string, string>>();
+    expect(row).toEqual({ location_name: "Aula Baru", location_address: "Jalan 1", location_map_url: "https://maps.example/abc" });
+    expect((await db.prepare("SELECT COUNT(*) n FROM audit_log WHERE action = 'event.location'").first<{ n: number }>())!.n).toBe(1);
+    // all empty = no location
+    expect((await updateEventLocation(db, "admin@test", event.id, "", "", "")).ok).toBe(true);
+    expect((await db.prepare("SELECT location_name FROM events").first<{ location_name: string | null }>())!.location_name).toBeNull();
+    await db.prepare("UPDATE events SET location_name='Masjid Al Hikmah', location_address='Medlerstraat 4, 2531 HA Den Haag', location_map_url='https://maps.app.goo.gl/7nLnjw15QhfiC6tA7'").run();
   });
 });

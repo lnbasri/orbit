@@ -42,6 +42,9 @@ export async function loader({ params }: Route.LoaderArgs) {
       speaker: event.speaker,
       theme: event.theme,
       infoUrl: event.info_url,
+      locationName: event.location_name,
+      locationAddress: event.location_address,
+      locationMapUrl: event.location_map_url,
       startsAt: event.starts_at,
       startsAtHijri: formatHijriDate(event.starts_at), // computed here so server and browser render the same text
       endsAt: event.ends_at,
