@@ -3,6 +3,7 @@
 @theme {
   /* Inter is self-hosted (@fontsource-variable/inter, imported in root.tsx): no third-party font requests. */
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-arabic: "Noto Naskh Arabic", "Traditional Arabic", serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
 
   /* PPME logo blue: HEX #034EA2 · RGB 3/78/162 · CMYK 100/80/0/0.
