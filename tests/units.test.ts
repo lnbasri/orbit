@@ -299,8 +299,8 @@ describe("dashboard chart data", () => {
 
 describe("Hijri date", () => {
   it("5 Dec 2026 is 25 Jumadil Akhir 1448 H (Umm al-Qura), in Amsterdam time", () => {
-    expect(formatHijriDate("2026-12-05T08:00:00.000Z")).toBe("25 Jumadil Akhir 1448 H");
-    expect(formatHijriDate("2026-12-04T08:00:00.000Z")).toBe("24 Jumadil Akhir 1448 H");
+    expect(formatHijriDate("2026-12-05T08:00:00.000Z")).toBe("25 Jumadil Akhir 1448");
+    expect(formatHijriDate("2026-12-04T08:00:00.000Z")).toBe("24 Jumadil Akhir 1448");
     expect(formatHijriDate("not a date")).toBe("");
   });
 });

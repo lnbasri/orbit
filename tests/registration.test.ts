@@ -114,7 +114,7 @@ describe("member registration: validate first, then the QR code", () => {
     expect(mail!.html).toContain("Keanggotaan Anda telah divalidasi");
     expect(mail!.html).toContain("calendar.google.com/calendar/render");
     expect(mail!.html).toContain("outlook.live.com/calendar/0/deeplink/compose");
-    expect(mail!.html).toContain("25 Jumadil Akhir 1448 H"); // Hijri date of the event day
+    expect(mail!.html).toContain("25 Jumadil Akhir 1448"); // Hijri date of the event day
     const ics = all.find((a) => a.contentType.startsWith("text/calendar"));
     expect(ics).toBeTruthy();
     expect(ics!.contentId).toBeUndefined();

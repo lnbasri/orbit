@@ -27,7 +27,7 @@ export interface PublicEvent {
   theme: string | null;
   infoUrl: string | null;
   startsAt: string;
-  /** Hijri date of the event day, computed on the server (e.g. "25 Jumadil Akhir 1448 H"). */
+  /** Hijri date of the event day, computed on the server (e.g. "25 Jumadil Akhir 1448"). */
   startsAtHijri?: string;
   endsAt: string;
   registrationClosesAt: string | null;
@@ -55,12 +55,14 @@ export function HeaderSection({ event }: { event: PublicEvent }) {
         </div>
 
         <div className="mt-6 max-w-3xl space-y-2 text-[15px] leading-relaxed text-slate-600 sm:text-base">
-          <p className="font-semibold text-slate-900">Assalamu'alaikum warahmatullahi wabarakatuh.</p>
-          <p lang="ar" dir="rtl" className="py-1 text-center text-2xl leading-loose font-medium text-slate-900 sm:text-[1.75rem]">
-            بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
+          <p lang="ar" dir="rtl" className="pt-1 text-right text-2xl leading-loose font-medium text-slate-900 sm:text-[1.75rem]">
+            بِسْمِ ٱللَّٰهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ
+          </p>
+          <p lang="ar" dir="rtl" className="pb-1 text-right text-xl leading-loose font-medium text-slate-900 sm:text-2xl">
+            اَلسَلامُ عَلَيْكُم وَرَحْمَةُ اَللهِ وَبَرَكاتُهُ
           </p>
           <p>
-            Bismillah, Panitia Kajian PPME Den Haag membuka pendaftaran peserta kajian
+            Panitia Kajian PPME Den Haag membuka pendaftaran peserta kajian
             {event.speaker ? (
               <>
                 {" "}

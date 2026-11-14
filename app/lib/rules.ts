@@ -41,7 +41,7 @@ export function registrationRules(e: RuleEventInfo): RegistrationRule[] {
     {
       key: "fee",
       parts: [
-        "Anggota PPME Den Haag gratis. Non-anggota: ",
+        { b: "Anggota PPME Den Haag gratis. Non-anggota: " },
         { b: `${formatEuro(e.priceCents)} per orang` },
         " untuk remaja dan dewasa (balita dan anak gratis), dibayar dalam ",
         { b: `${e.payWindowHours} jam` },
