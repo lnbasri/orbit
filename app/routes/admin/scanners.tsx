@@ -22,13 +22,15 @@ import { Link, useFetcher } from "react-router";
 import type { Route } from "./+types/scanners";
 import { ActionButton, EmptyState, Notice, PageHeader, Panel, Stat, StatGroup } from "~/components/admin";
 import { ListboxSelect, TextField } from "~/components/forms";
-import { Spinner, buttonClass } from "~/components/ui";
+import { Callout, Spinner, buttonClass } from "~/components/ui";
 import { handleAdminIntent } from "~/lib/admin-actions.server";
 import { adminEmailContext } from "~/lib/admin-context";
 import { getEventBySlug } from "~/lib/db.server";
 import { getAppEnv } from "~/lib/env.server";
 import { formatDateTime } from "~/lib/format";
-import { linkSuggestions, listContacts, listScanners } from "~/lib/scanners.server";
+import { CAPACITY_ASSUMPTIONS, compareTeam, teamScenarios, type Scenario, type TeamComparison } from "~/lib/scanner-capacity";
+import { presenceOf, type Presence } from "~/lib/scanner-presence";
+import { linkSuggestions, listContacts, listScanners, teamDemand } from "~/lib/scanners.server";
 
 export function meta() {
   return [{ title: "Petugas Scan – PPME Den Haag" }, { name: "robots", content: "noindex" }];
@@ -37,15 +39,20 @@ export function meta() {
 export async function loader() {
   const env = getAppEnv();
   const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");
-  const scanners = await listScanners(env.DB);
+  const rawScanners = await listScanners(env.DB);
+  const now = new Date();
+  // Online / offline as the phones last reported (heartbeat every 20 s while the app is open).
+  const scanners = rawScanners.map((s) => ({ ...s, presence: presenceOf(s.last_seen, s.last_state, now, s.sessions > 0) }));
   const [suggestions, contacts] = await Promise.all([linkSuggestions(env.DB, scanners), listContacts(env.DB)]);
-  return {
-    scanners,
-    suggestions,
-    contacts,
-    scannerHost: env.PUBLIC_APP_URL ? null : null,
-    eventStarts: event?.starts_at ?? null,
+  const activeScanners = scanners.filter((s) => s.active === 1);
+  const have = {
+    active: activeScanners.length,
+    leads: activeScanners.filter((s) => s.role === "lead").length,
+    ready: activeScanners.filter((s) => s.test_passed === 1).length,
   };
+  const demand = event ? await teamDemand(env.DB, event) : null;
+  const staffing = demand ? teamScenarios(demand).map((s) => ({ ...s, cmp: compareTeam(s, have) })) : [];
+  return { scanners, suggestions, contacts, staffing, demand };
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -65,10 +72,19 @@ const READY_BADGE: Record<Readiness, { label: string; cls: string }> = {
   failed: { label: "Gagal tes", cls: "bg-red-50 text-red-700 ring-red-200" },
 };
 
+const PRESENCE_BADGE: Record<Presence, { label: string; cls: string }> = {
+  online: { label: "Online", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  idle: { label: "Siaga", cls: "bg-sky-50 text-sky-700 ring-sky-200" },
+  problem: { label: "Kamera bermasalah", cls: "bg-red-50 text-red-700 ring-red-200" },
+  away: { label: "Tidak aktif", cls: "bg-amber-50 text-amber-800 ring-amber-200" },
+  offline: { label: "Offline", cls: "bg-slate-100 text-slate-600 ring-slate-200" },
+  signed_out: { label: "Belum login", cls: "bg-slate-50 text-slate-500 ring-slate-200" },
+};
+
 const LEVEL_LABEL = { 1: "Keamanan", 2: "Panitia (meja info)", 3: "Pengurus (bestuur)" } as const;
 
 export default function Scanners({ loaderData }: Route.ComponentProps) {
-  const { scanners, suggestions, contacts } = loaderData;
+  const { scanners, suggestions, contacts, staffing, demand } = loaderData;
   const active = scanners.filter((s) => s.active === 1);
   const ready = active.filter((s) => readiness(s) === "ready").length;
   const everLoggedIn = active.filter((s) => s.last_login_at).length;
@@ -100,6 +116,8 @@ export default function Scanners({ loaderData }: Route.ComponentProps) {
           <Stat label="Belum terdaftar peserta" value={unregistered} sub="belum ada pendaftaran atau tautan" icon={ExclamationTriangleIcon} />
         </StatGroup>
 
+        <Staffing staffing={staffing} peopleNow={demand?.acceptedPeople ?? 0} />
+
         <AddScanners />
 
         <Panel title="Papan kesiapan" icon={ShieldCheckIcon} flush>
@@ -121,6 +139,12 @@ export default function Scanners({ loaderData }: Route.ComponentProps) {
                             {s.role === "lead" ? "Ketua tim" : "Petugas"}
                           </span>
                           <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${badge.cls}`}>{badge.label}</span>
+                          {s.active === 1 ? (
+                            <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${PRESENCE_BADGE[s.presence].cls}`}>
+                              <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
+                              {PRESENCE_BADGE[s.presence].label}
+                            </span>
+                          ) : null}
                           {s.active === 0 ? <span className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 ring-1 ring-red-200 ring-inset">Nonaktif</span> : null}
                         </div>
                         {s.name ? <div className="text-sm break-all text-slate-600">{s.email}</div> : null}
@@ -240,6 +264,94 @@ export default function Scanners({ loaderData }: Route.ComponentProps) {
         </Panel>
       </div>
     </div>
+  );
+}
+
+type StaffingRow = Scenario & { cmp: TeamComparison };
+
+const SCENARIO_LABEL = {
+  now: { title: "Saat ini", sub: "tiket sah (diterima)" },
+  pipeline: { title: "Dengan yang menunggu", sub: "ditambah menunggu validasi/bayar" },
+  full: { title: "Jika kuota penuh", sub: "semua kursi kuota terisi" },
+} as const;
+
+const VERDICT = {
+  short: { label: "Kurang", cls: "bg-red-50 text-red-700 ring-red-200", text: "Kurang bahkan jika semua lancar (1 menit per pendaftaran)." },
+  tight: { label: "Pas-pasan", cls: "bg-amber-50 text-amber-800 ring-amber-200", text: "Cukup hanya jika proses lancar; kurang untuk perkiraan rata-rata atau ketua tim belum cukup." },
+  enough: { label: "Cukup", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200", text: "Cukup untuk perkiraan rata-rata; antrean bisa memanjang jika banyak kasus sulit." },
+  robust: { label: "Aman", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200", text: "Cukup juga untuk kasus tersulit (4 menit per pendaftaran)." },
+} as const;
+
+function gapText(gap: number, unit: string) {
+  return gap >= 0 ? `cukup (+${gap} ${unit})` : `kurang ${-gap} ${unit}`;
+}
+
+function Staffing({ staffing, peopleNow }: { staffing: StaffingRow[]; peopleNow: number }) {
+  if (staffing.length === 0) return null;
+  const A = CAPACITY_ASSUMPTIONS;
+  const M = A.minutesPerRegistration;
+  const now = staffing[0].cmp;
+  const full = staffing[2];
+  const rank = { short: 0, tight: 1, enough: 2, robust: 3 } as const;
+  const headline =
+    rank[now.verdict] < 2
+      ? `Tim saat ini belum cukup untuk peserta yang sudah terkonfirmasi (perlu sekitar ${staffing[0].rec.team}, terdaftar ${now.have}).`
+      : rank[full.cmp.verdict] < 2
+        ? `Cukup untuk peserta saat ini. Jika kuota penuh, perlu sekitar ${full.rec.team} petugas (terdaftar ${now.have}).`
+        : full.cmp.verdict === "enough"
+          ? "Cukup untuk perkiraan rata-rata, juga jika kuota penuh. Tambahan petugas membuat antrean aman saat banyak kasus sulit."
+          : "Jumlah petugas dan ketua tim sudah aman, juga jika kuota penuh dan banyak kasus sulit.";
+  const tone = rank[now.verdict] < 2 ? "danger" : rank[full.cmp.verdict] < 2 ? "warning" : "success";
+  return (
+    <Panel title="Rekomendasi jumlah petugas" icon={UserGroupIcon}>
+      <Callout tone={tone} icon={tone === "success" ? CheckCircleIcon : ExclamationTriangleIcon} className="mb-5">
+        <p className="font-semibold">{headline}</p>
+        <p>
+          Terdaftar sebagai petugas aktif: <span className="font-semibold">{now.have}</span> ({now.haveLeads} ketua tim), dengan perangkat siap:{" "}
+          <span className="font-semibold">{now.haveReady}</span>. Peserta dengan tiket sah saat ini: {peopleNow} orang.
+          {now.haveReady < full.rec.team ? " Minta semua petugas menjalankan uji perangkat sebelum Kamis 3 Desember." : ""}
+        </p>
+      </Callout>
+      <div className="grid gap-px overflow-hidden rounded-lg border border-slate-200/80 bg-slate-200/80 lg:grid-cols-3">
+        {staffing.map((s) => {
+          const label = SCENARIO_LABEL[s.key];
+          const v = VERDICT[s.cmp.verdict];
+          return (
+            <div key={s.key} className="bg-white/90 px-4 py-4 sm:px-5">
+              <p className="text-[13px] font-semibold text-slate-900">{label.title}</p>
+              <p className="text-xs text-slate-500">{label.sub}</p>
+              <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 tabular-nums">
+                {s.rec.team} <span className="text-sm font-normal text-slate-500">petugas, termasuk {s.rec.leads} ketua tim</span>
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Rentang {s.range.best.team}–{s.range.worst.team} petugas ({M.best}–{M.worst} menit per pendaftaran) · {s.registrations} pendaftaran, {s.rec.peakLookups} di jam sibuk
+              </p>
+              <ul className="mt-3 space-y-1 text-sm">
+                <li className={s.cmp.teamGap >= 0 ? "text-emerald-700" : "font-medium text-red-600"}>Petugas: {gapText(s.cmp.teamGap, "orang")}</li>
+                <li className={s.cmp.leadGap >= 0 ? "text-emerald-700" : "font-medium text-red-600"}>Ketua tim: {gapText(s.cmp.leadGap, "orang")}</li>
+                <li className={s.cmp.readyGap >= 0 ? "text-emerald-700" : "text-amber-700"}>Perangkat siap: {gapText(s.cmp.readyGap, "orang")}</li>
+                {s.cmp.worstGap > 0 ? <li className="text-slate-600">Untuk kasus tersulit: tambah {s.cmp.worstGap} orang</li> : null}
+              </ul>
+              <span className={`mt-3 inline-block rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${v.cls}`}>{v.label}</span>
+              <p className="mt-1.5 text-xs text-slate-500">{v.text}</p>
+            </div>
+          );
+        })}
+      </div>
+      <details className="mt-4 text-xs text-slate-500">
+        <summary className="cursor-pointer font-medium text-slate-600">Dasar perhitungan</summary>
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          <li>
+            Setiap pendaftaran dilayani: scan, identifikasi, token fisik sekali pakai, dan penjelasan singkat. Waktu per pendaftaran {M.best}–{M.worst} menit (patokan: {M.planning} menit, tengah rentang). Satu keluarga = satu pendaftaran.
+          </li>
+          <li>Satu petugas menyelesaikan sekitar {Math.floor(A.peakMinutes / M.planning)} pendaftaran dalam {A.peakMinutes} menit sibuk (rentang {Math.floor(A.peakMinutes / M.worst)}–{Math.floor(A.peakMinutes / M.best)}).</li>
+          <li>{Math.round(A.peakShare * 100)}% pendaftaran diperkirakan tiba dalam {A.peakMinutes} menit sebelum acara.</li>
+          <li>Cadangan {Math.round((A.spareFactor - 1) * 100)}% untuk istirahat atau ponsel mati, minimal {A.minTeam} petugas di satu pintu, satu ketua tim per {A.teamPerLead} petugas.</li>
+          <li>Perhitungan untuk satu pintu masuk. Beberapa pintu: bagi petugas per pintu, minimal {A.minTeam} per pintu. Keamanan dan meja info tidak termasuk.</li>
+          <li>Perkiraan, bukan jaminan. Jika pintu dibuka lebih awal dan kedatangan lebih tersebar, kebutuhan turun; jika semua datang bersamaan, naik.</li>
+        </ul>
+      </details>
+    </Panel>
   );
 }
 

@@ -1,6 +1,8 @@
 import { normalizeEmail, parseEmailList } from "./admins.server";
 import { auditStatement, type EventRow } from "./db.server";
 import { checkinStats, type ScannerRole } from "./checkin.server";
+import { seatsUsed } from "./db.server";
+import type { TeamDemandInput } from "./scanner-capacity";
 import { normalizeWhatsapp } from "./validation";
 
 /** Admin-side management of the scanning team, escalation contacts, device self-tests and the check-in gate. */
@@ -19,6 +21,9 @@ export interface ScannerListRow {
   added_at: string;
   last_login_at: string | null;
   sessions: number;
+  /** Newest heartbeat of any live session, and the state it reported (see scanner-presence.ts). */
+  last_seen: string | null;
+  last_state: string | null;
   test_at: string | null;
   test_passed: number | null;
   test_device: string | null;
@@ -32,6 +37,8 @@ export async function listScanners(db: D1Database, now = new Date()): Promise<Sc
     .prepare(
       `SELECT s.*,
          (SELECT COUNT(*) FROM scanner_sessions ss WHERE ss.scanner_id = s.id AND ss.expires_at > ?) AS sessions,
+         (SELECT MAX(ss.last_seen_at) FROM scanner_sessions ss WHERE ss.scanner_id = s.id AND ss.expires_at > ?) AS last_seen,
+         (SELECT ss.last_state FROM scanner_sessions ss WHERE ss.scanner_id = s.id AND ss.expires_at > ? ORDER BY ss.last_seen_at DESC LIMIT 1) AS last_state,
          (SELECT t.at FROM scanner_selftests t WHERE t.scanner_id = s.id ORDER BY t.id DESC LIMIT 1) AS test_at,
          (SELECT t.passed FROM scanner_selftests t WHERE t.scanner_id = s.id ORDER BY t.id DESC LIMIT 1) AS test_passed,
          (SELECT t.device_label FROM scanner_selftests t WHERE t.scanner_id = s.id ORDER BY t.id DESC LIMIT 1) AS test_device,
@@ -40,7 +47,7 @@ export async function listScanners(db: D1Database, now = new Date()): Promise<Sc
          (SELECT p.full_name FROM participants p WHERE p.id = s.participant_id) AS linked_name
        FROM scanners s ORDER BY s.role DESC, s.added_at, s.email`,
     )
-    .bind(now.toISOString())
+    .bind(now.toISOString(), now.toISOString(), now.toISOString())
     .all<ScannerListRow>();
   return results;
 }
@@ -327,6 +334,36 @@ export async function recentCheckins(db: D1Database, eventId: number, limit = 40
     .bind(eventId, limit)
     .all<RecentCheckin>();
   return results;
+}
+
+/** Numbers behind the staffing recommendation (see scanner-capacity.ts). */
+export async function teamDemand(db: D1Database, event: EventRow, now = new Date()): Promise<TeamDemandInput> {
+  const nowIso = now.toISOString();
+  const [accepted, pending, member, nonMember] = await Promise.all([
+    db
+      .prepare(
+        `SELECT COUNT(DISTINCT r.id) AS regs, COUNT(p.id) AS people FROM registrations r JOIN participants p ON p.registration_id = r.id
+         WHERE r.event_id = ? AND r.status = 'accepted' AND p.status = 'accepted' AND p.qr_token IS NOT NULL`,
+      )
+      .bind(event.id)
+      .first<{ regs: number; people: number }>(),
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM registrations WHERE event_id = ? AND source = 'online'
+           AND (status = 'pending_membership' OR (status = 'pending_payment' AND pay_deadline > ?))`,
+      )
+      .bind(event.id, nowIso)
+      .first<{ n: number }>(),
+    seatsUsed(db, event.id, true, nowIso),
+    seatsUsed(db, event.id, false, nowIso),
+  ]);
+  return {
+    acceptedRegistrations: accepted?.regs ?? 0,
+    acceptedPeople: accepted?.people ?? 0,
+    pendingRegistrations: pending?.n ?? 0,
+    quotaSeats: event.quota_member + event.quota_non_member,
+    seatsUsed: member + nonMember,
+  };
 }
 
 export async function checkinOverview(db: D1Database, event: EventRow) {

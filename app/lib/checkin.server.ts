@@ -18,6 +18,8 @@ export interface ScannerIdentity {
   role: ScannerRole;
   participantId: string | null;
   deviceLabel: string | null;
+  /** SHA-256 of the session token (heartbeat target). Absent in the development bypass. */
+  sessionHash?: string;
 }
 
 export type ReasonCode =
