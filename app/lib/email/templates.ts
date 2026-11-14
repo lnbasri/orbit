@@ -94,8 +94,8 @@ export function manageSection(m: ManageInfo | undefined, pending = false) {
         : "selama pendaftaran masih dibuka";
     return callout(
       `<strong>Lihat atau ubah pendaftaran</strong><br>` +
-        `Anda dapat melihat dan mengubah data pendaftaran (nama, nomor WhatsApp, serta data dan jumlah peserta) ${when} melalui:<br>` +
-        `${link(m.url)}<br>` +
+        `Anda dapat melihat dan mengubah data pendaftaran (nama, nomor WhatsApp, serta data dan jumlah peserta) ${when} melalui tombol berikut:` +
+        buttonLink("Lihat atau Ubah Pendaftaran", m.url) +
         small(
           `Masuk dengan alamat email ini; kode akses akan dikirim ke email Anda. Alamat email dan status keanggotaan hanya dapat diubah melalui panitia (${mail(m.contact)}).`,
         ),

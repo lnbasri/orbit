@@ -142,6 +142,8 @@ describe("member self-service edit", () => {
     expect(mail.subject).toMatch(/^Pembaruan Konfirmasi/);
     expect(mail.html).toContain("telah diperbarui");
     expect(mail.html).toContain("https://public.example/e/kajian-aisah-dahlan-2026/pendaftaran-saya");
+    // the manage link is a button (like "Berikan Infaq"), not a bare URL
+    expect(mail.html).toMatch(/<a href="https:\/\/public\.example\/e\/kajian-aisah-dahlan-2026\/pendaftaran-saya"[^>]*>Lihat atau Ubah Pendaftaran<\/a>/);
     expect(mail.html).toContain("Peserta Tambahan");
     // same "Ketentuan pendaftaran" as the public form, incl. the former "Catatan penting"
     expect(mail.html).toContain("Ketentuan Pendaftaran");
