@@ -24,7 +24,12 @@ export interface EventRow {
   status: "draft" | "open" | "closed";
 }
 
-export type RegistrationStatus = "accepted" | "pending_payment" | "expired" | "rejected_quota" | "rejected_membership";
+export type RegistrationStatus =
+  | "accepted"
+  | "pending_payment"
+  | "pending_membership"
+  | "expired" | "rejected_quota"
+  | "rejected_membership";
 
 export interface RegistrationRow {
   id: string;
@@ -35,6 +40,8 @@ export interface RegistrationRow {
   email: string | null;
   whatsapp: string | null;
   people: number;
+  /** People that count toward the quota (remaja + dewasa; balita and anak do not). */
+  seats: number;
   source: "online" | "manual";
   status: RegistrationStatus;
   payment_status: string;
@@ -64,7 +71,7 @@ export interface ParticipantRow {
   full_name: string;
   age_group: "balita" | "anak" | "remaja" | "dewasa";
   gender: "laki-laki" | "perempuan" | null;
-  status: "accepted" | "pending_payment" | "expired" | "rejected";
+  status: "accepted" | "pending_payment" | "pending_membership" | "expired" | "rejected";
   qr_token: string | null;
   checked_in_at: string | null;
   checked_in_by: string | null;
@@ -91,14 +98,15 @@ export async function getParticipants(db: D1Database, registrationId: string) {
 }
 
 /**
- * Seats held in one quota group: online registrations that are accepted, or pending with a
- * deadline still in the future. Manual registrations never count (decision 11 Nov 2026).
+ * Seats held in one quota group: online registrations that are accepted, waiting for member validation, or pending
+ * payment with a deadline still in the future. Manual registrations never count (decision 11 Nov 2026). A seat is a
+ * remaja or dewasa (`registrations.seats`); balita and anak never count (decision 14 Nov 2026).
  * Expects binds: event_id, is_member, now.
  */
 export const SEATS_USED_SQL = `
-  SELECT COALESCE(SUM(people), 0) FROM registrations
+  SELECT COALESCE(SUM(seats), 0) FROM registrations
   WHERE event_id = ? AND is_member = ? AND source = 'online'
-    AND (status = 'accepted' OR (status = 'pending_payment' AND pay_deadline > ?))`;
+    AND (status IN ('accepted', 'pending_membership') OR (status = 'pending_payment' AND pay_deadline > ?))`;
 
 export async function seatsUsed(db: D1Database, eventId: number, isMember: boolean, nowIso: string) {
   const row = await db

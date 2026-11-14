@@ -5,7 +5,18 @@ export interface JobReport {
   expired: number;
   reminders: number;
   retried: number;
+  /** QR emails left for the next run because this run reached its QR budget. */
+  deferred: number;
 }
+
+/**
+ * QR images are generated inside the Worker (~2.7 ms CPU each, measured), and the Free plan allows ~10 ms CPU per
+ * invocation (gap N3). The sweeper therefore sends QR (confirmation) emails in BATCHES: at most this many QR codes
+ * per run, oldest first, so one run never has to render dozens of tickets. The rest waits for the next 5-minute
+ * run (it stays 'pending' in the outbox), and the first email of a run is always sent, so a big family cannot starve.
+ * Raise it on Workers Paid (no 10 ms limit).
+ */
+export const QR_BUDGET_PER_RUN = 8;
 
 /**
  * FR-JOB-*: runs every 5 minutes from the Cron Trigger (and on demand from the admin page).
@@ -60,7 +71,7 @@ export async function expireDue(db: D1Database, now = new Date()): Promise<strin
 
 export async function runDeadlineJob(db: D1Database, cfg: EmailConfig, now = new Date()): Promise<JobReport> {
   const nowIso = now.toISOString();
-  const report: JobReport = { expired: 0, reminders: 0, retried: 0 };
+  const report: JobReport = { expired: 0, reminders: 0, retried: 0, deferred: 0 };
 
   for (const id of await expireDue(db, now)) {
     report.expired++;
@@ -85,11 +96,13 @@ export async function runDeadlineJob(db: D1Database, cfg: EmailConfig, now = new
   const { results: failed } = await db
     .prepare(
       `SELECT registration_id, kind FROM email_log
-       WHERE status IN ('failed', 'pending') AND attempts < ? AND updated_at <= ?`,
+       WHERE status IN ('failed', 'pending') AND attempts < ? AND updated_at <= ?
+       ORDER BY updated_at ASC`,
     )
     .bind(MAX_EMAIL_ATTEMPTS, new Date(now.getTime() - 60_000).toISOString())
     .all<{ registration_id: string; kind: EmailKind }>();
 
+  let qrUsed = 0;
   for (const row of failed) {
     // A reminder for a registration that is no longer pending is pointless.
     if (row.kind === "reminder" || row.kind === "payment_instructions") {
@@ -98,6 +111,28 @@ export async function runDeadlineJob(db: D1Database, cfg: EmailConfig, now = new
         .bind(row.registration_id)
         .first();
       if (!still) continue;
+    }
+    // Same for the "waiting for validation" notice once the member has been validated or rejected.
+    if (row.kind === "membership_pending") {
+      const still = await db
+        .prepare("SELECT 1 AS ok FROM registrations WHERE id = ? AND status = 'pending_membership'")
+        .bind(row.registration_id)
+        .first();
+      if (!still) continue;
+    }
+    if (row.kind === "confirmation") {
+      const tickets = await db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM participants WHERE registration_id = ? AND status = 'accepted' AND qr_token IS NOT NULL",
+        )
+        .bind(row.registration_id)
+        .first<{ n: number }>();
+      const n = tickets?.n ?? 0;
+      if (qrUsed > 0 && qrUsed + n > QR_BUDGET_PER_RUN) {
+        report.deferred++;
+        continue;
+      }
+      qrUsed += n;
     }
     const r = await deliverEmail(db, cfg, row.registration_id, row.kind, { now });
     if (r.ok && !r.skipped) report.retried++;

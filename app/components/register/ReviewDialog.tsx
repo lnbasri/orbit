@@ -94,7 +94,7 @@ export function ReviewDialog({
                     value={summary.marketingOptIn ? "Ya, bersedia menerima informasi" : "Tidak"}
                   />
                 </dl>
-                <p className="mt-2 text-[13px] text-slate-500">Konfirmasi dan QR Code dikirim ke alamat email di atas.</p>
+                <p className="mt-2 text-[13px] text-slate-500">Konfirmasi dikirim ke alamat email di atas. QR Code menyusul setelah pembayaran dikonfirmasi atau keanggotaan divalidasi.</p>
               </section>
 
               <section>

@@ -23,26 +23,29 @@ export const UNSENT_GRACE_MS = 5 * 60_000;
 
 /**
  * Registrations whose required email is not 'sent' yet: confirmation (accepted), payment instructions
- * (pending payment) or expiry notice (expired). Covers rows that are pending/failed AND rows with no email_log row.
- * Manual registrations are excluded (the system sends them nothing). Binds: cut, cut, cut.
+ * (pending payment), membership notice (waiting for member validation) or expiry notice (expired). Covers rows that are pending/failed AND rows with no email_log row.
+ * Manual registrations are excluded (the system sends them nothing). Binds: cut x4.
  */
 export function unsentEmailSql(cutIso: string) {
   const notSent = (kind: string) =>
     `NOT EXISTS (SELECT 1 FROM email_log l WHERE l.registration_id = r.id AND l.kind = '${kind}' AND l.status = 'sent')`;
   return {
     sql: `(r.source = 'online' AND r.email IS NOT NULL AND (
-      (r.status = 'accepted' AND COALESCE(r.paid_at, r.created_at) <= ? AND ${notSent("confirmation")})
+      (r.status = 'accepted' AND COALESCE(r.paid_at, r.membership_verified_at, r.created_at) <= ? AND ${notSent("confirmation")})
       OR (r.status = 'pending_payment' AND r.created_at <= ? AND ${notSent("payment_instructions")})
+      OR (r.status = 'pending_membership' AND r.created_at <= ? AND ${notSent("membership_pending")})
       OR (r.status = 'expired' AND r.pay_deadline <= ? AND ${notSent("expired")})))`,
-    binds: [cutIso, cutIso, cutIso],
+    binds: [cutIso, cutIso, cutIso, cutIso],
   };
 }
 
 /**
- * Records that wait for an admin: a pending payment inside its deadline, or an accepted member that is not validated yet.
+ * Records that wait for an admin: a pending payment inside its deadline, a member waiting for validation, or (legacy,
+ * registered before validation came first) an accepted member that is not verified yet.
  * Same predicates as the row buttons in routes/admin/registrations.tsx. One bind: now.
  */
 const ACTIONABLE_SQL = `((r.status = 'pending_payment' AND r.payment_status = 'pending' AND r.pay_deadline > ?)
+    OR r.status = 'pending_membership'
     OR (r.is_member = 1 AND r.status = 'accepted' AND r.membership_verified_at IS NULL))`;
 
 function whereClause(eventId: number, f: RegistrationFilters, nowIso: string) {
@@ -168,7 +171,8 @@ export async function dashboardStats(db: D1Database, event: EventRow, now = new 
   const unverified = await db
     .prepare(
       `SELECT COUNT(*) AS n FROM registrations
-       WHERE event_id = ? AND is_member = 1 AND status = 'accepted' AND membership_verified_at IS NULL`,
+       WHERE event_id = ? AND is_member = 1 AND membership_verified_at IS NULL
+         AND status IN ('accepted', 'pending_membership')`,
     )
     .bind(event.id)
     .first<{ n: number }>();
@@ -183,7 +187,7 @@ export async function dashboardStats(db: D1Database, event: EventRow, now = new 
   const regRows = await db
     .prepare(
       `SELECT r.created_at, r.is_member, r.people FROM registrations r
-       WHERE r.event_id = ? AND (r.status = 'accepted' OR (r.status = 'pending_payment' AND r.pay_deadline > ?))
+       WHERE r.event_id = ? AND (r.status IN ('accepted', 'pending_membership') OR (r.status = 'pending_payment' AND r.pay_deadline > ?))
        ORDER BY r.created_at`,
     )
     .bind(event.id, nowIso)
@@ -193,7 +197,7 @@ export async function dashboardStats(db: D1Database, event: EventRow, now = new 
   const ageRows = await db
     .prepare(
       `SELECT p.age_group, r.is_member, COUNT(*) AS n FROM participants p JOIN registrations r ON r.id = p.registration_id
-       WHERE r.event_id = ? AND (r.status = 'accepted' OR (r.status = 'pending_payment' AND r.pay_deadline > ?))
+       WHERE r.event_id = ? AND (r.status IN ('accepted', 'pending_membership') OR (r.status = 'pending_payment' AND r.pay_deadline > ?))
        GROUP BY p.age_group, r.is_member`,
     )
     .bind(event.id, nowIso)

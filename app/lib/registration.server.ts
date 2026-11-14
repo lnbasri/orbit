@@ -1,4 +1,4 @@
-import { payingCount } from "./format";
+import { payingCount, seatCount } from "./format";
 import {
   SEATS_USED_SQL,
   getEventById,
@@ -7,11 +7,12 @@ import {
   type RegistrationRow,
 } from "./db.server";
 import { outboxStatement } from "./email/send.server";
-import { newId, newTicketToken } from "./ids";
+import { newId } from "./ids";
 import { MEDIA_NOTICE_VERSION } from "./rules";
 import type { RegistrationInput } from "./validation";
 
 export type RegisterResult =
+  | { kind: "pending_membership"; registrationId: string; people: number }
   | { kind: "accepted"; registrationId: string; people: number }
   | {
       kind: "pending_payment";
@@ -21,7 +22,7 @@ export type RegisterResult =
       amountCents: number;
       payDeadline: string;
     }
-  | { kind: "rejected_quota"; registrationId: string; remaining: number; people: number }
+  | { kind: "rejected_quota"; registrationId: string; remaining: number; people: number; seats: number }
   | { kind: "duplicate_email" }
   | { kind: "closed"; reason: string };
 
@@ -44,6 +45,8 @@ export function registrationWindowError(event: EventRow, now: Date): string | nu
 
 function resultFromRow(row: RegistrationRow, remaining = 0): RegisterResult {
   switch (row.status) {
+    case "pending_membership":
+      return { kind: "pending_membership", registrationId: row.id, people: row.people };
     case "accepted":
       return { kind: "accepted", registrationId: row.id, people: row.people };
     case "pending_payment":
@@ -56,7 +59,7 @@ function resultFromRow(row: RegistrationRow, remaining = 0): RegisterResult {
         payDeadline: row.pay_deadline ?? "",
       };
     case "rejected_quota":
-      return { kind: "rejected_quota", registrationId: row.id, remaining, people: row.people };
+      return { kind: "rejected_quota", registrationId: row.id, remaining, people: row.people, seats: row.seats };
     default:
       return { kind: "closed", reason: "Pendaftaran ini sudah kedaluwarsa." };
   }
@@ -99,6 +102,7 @@ export async function registerOnline(
 
   const isMember = input.membership === "Ya";
   const people = input.participants.length;
+  const seats = seatCount(input.participants); // only remaja + dewasa take a quota seat
   const registrationId = newId();
   const amountCents = isMember ? 0 : payingCount(input.participants) * event.price_non_member_cents;
   const payDeadline = isMember
@@ -117,10 +121,10 @@ export async function registerOnline(
     db
       .prepare(
         `INSERT INTO registrations (
-           id, event_id, created_at, registrant_name, is_member, email, whatsapp, people, source,
+           id, event_id, created_at, registrant_name, is_member, email, whatsapp, people, seats, source,
            status, payment_status, payment_code, amount_cents, pay_deadline,
            consent_at, privacy_version, media_consent_at, media_notice_version, marketing_opt_in, idempotency_key)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, ?,
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, ?,
            ${isMember ? "NULL" : "(SELECT payment_prefix || printf('%06d', payment_counter) FROM events WHERE id = ?)"},
            ?, ?, ?, ?, ?, ?, ?, ?
          WHERE (${SEATS_USED_SQL}) + ? <= (SELECT ${quotaColumn} FROM events WHERE id = ?)`,
@@ -134,7 +138,8 @@ export async function registerOnline(
         input.email,
         input.whatsapp,
         people,
-        isMember ? "accepted" : "pending_payment",
+        seats,
+        isMember ? "pending_membership" : "pending_payment",
         isMember ? "free" : "pending",
         ...(isMember ? [] : [event.id]),
         amountCents,
@@ -148,7 +153,7 @@ export async function registerOnline(
         event.id,
         isMember ? 1 : 0,
         nowIso,
-        people,
+        seats,
         event.id,
       ),
   );
@@ -168,15 +173,16 @@ export async function registerOnline(
           p.name,
           p.ageGroup,
           p.gender,
-          isMember ? "accepted" : "pending_payment",
-          isMember ? newTicketToken() : null,
+          // Members get their ticket codes only once an admin has validated the membership (acceptMember).
+          isMember ? "pending_membership" : "pending_payment",
+          null,
           registrationId,
         ),
     );
   });
 
   // Outbox: the email is recorded in the SAME transaction as the registration, so it cannot be lost.
-  statements.push(outboxStatement(db, registrationId, isMember ? "confirmation" : "payment_instructions", nowIso));
+  statements.push(outboxStatement(db, registrationId, isMember ? "membership_pending" : "payment_instructions", nowIso));
 
   let results: D1Result[];
   try {
@@ -198,7 +204,7 @@ export async function registerOnline(
   const inserted = (results[isMember ? 0 : 1].meta.changes ?? 0) === 1;
 
   if (inserted) {
-    if (isMember) return { kind: "accepted", registrationId, people };
+    if (isMember) return { kind: "pending_membership", registrationId, people };
     const row = await db
       .prepare("SELECT payment_code FROM registrations WHERE id = ?")
       .bind(registrationId)
@@ -222,9 +228,9 @@ export async function registerOnline(
     db
       .prepare(
         `INSERT INTO registrations (
-           id, event_id, created_at, registrant_name, is_member, email, whatsapp, people, source,
+           id, event_id, created_at, registrant_name, is_member, email, whatsapp, people, seats, source,
            status, payment_status, amount_cents, consent_at, privacy_version, media_consent_at, media_notice_version, marketing_opt_in, idempotency_key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'online', 'rejected_quota', 'not_processed', 0, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', 'rejected_quota', 'not_processed', 0, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         registrationId,
@@ -235,6 +241,7 @@ export async function registerOnline(
         input.email,
         input.whatsapp,
         people,
+        seats,
         nowIso,
         event.privacy_version,
         nowIso,
@@ -253,7 +260,7 @@ export async function registerOnline(
   ];
   await db.batch(rejected);
 
-  return { kind: "rejected_quota", registrationId, remaining, people };
+  return { kind: "rejected_quota", registrationId, remaining, people, seats };
 }
 
 export async function quotaSummary(db: D1Database, event: EventRow, now = new Date()) {

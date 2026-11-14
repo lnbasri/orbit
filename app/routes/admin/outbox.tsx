@@ -77,7 +77,7 @@ export default function Outbox({ loaderData }: Route.ComponentProps) {
                         {m.attachments ? (
                           <span className="inline-flex items-center gap-0.5">
                             <PaperClipIcon className="size-3.5" aria-hidden="true" />
-                            {m.attachments} QR
+                            {m.attachments} lampiran
                           </span>
                         ) : null}
                       </div>

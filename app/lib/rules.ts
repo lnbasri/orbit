@@ -23,7 +23,14 @@ export interface RuleEventInfo {
 export function registrationRules(e: RuleEventInfo): RegistrationRule[] {
   return [
     { key: "group", parts: [`Pendaftaran perorangan atau keluarga, maksimal ${e.maxFamily} orang termasuk pendaftar.`] },
-    { key: "quota", parts: ["Pendaftaran ditolak bila kuota tidak mencukupi untuk seluruh peserta yang didaftarkan."] },
+    {
+      key: "quota",
+      parts: [
+        "Kuota dihitung per orang untuk peserta ",
+        { b: "remaja dan dewasa" },
+        " (balita dan anak tidak dihitung). Pendaftaran ditolak bila kuota tidak mencukupi untuk seluruh peserta yang didaftarkan.",
+      ],
+    },
     {
       key: "closed",
       parts: [
@@ -44,14 +51,16 @@ export function registrationRules(e: RuleEventInfo): RegistrationRule[] {
     {
       key: "membership",
       parts: [
-        "Keanggotaan PPME Den Haag akan diverifikasi oleh panitia. ",
+        "Keanggotaan PPME Den Haag akan divalidasi oleh panitia ",
+        { b: "sebelum QR Code dikirim" },
+        ". ",
         {
           b: "Apabila keanggotaan tidak dapat dipastikan, panitia/pengurus PPME Den Haag berhak membatalkan pendaftaran.",
         },
         " Dalam hal ini Bapak/Ibu tetap dapat mendaftar kembali sebagai non-anggota selama kuota masih tersedia. Mohon pengertian Bapak/Ibu.",
       ],
     },
-    { key: "qr", parts: ["QR Code dikirim lewat email setelah pendaftaran diterima atau pembayaran dikonfirmasi."] },
+    { key: "qr", parts: ["QR Code dikirim lewat email setelah pembayaran dikonfirmasi (non-anggota) atau keanggotaan Anda divalidasi panitia (anggota)."] },
     { key: "email", parts: [{ b: "Pastikan alamat email Anda benar, dan periksa juga folder spam." }] },
     { key: "once", parts: ["Setiap QR Code hanya dapat digunakan satu kali saat check-in."] },
     {

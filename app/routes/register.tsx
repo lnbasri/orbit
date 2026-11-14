@@ -13,6 +13,7 @@ import { PencilSquareIcon } from "@heroicons/react/24/outline";
 import { bankConfigured, bankInfo, emailConfig, featureEnabled, isDev } from "~/lib/config.server";
 import { getAppEnv } from "~/lib/env.server";
 import { getEventBySlug } from "~/lib/db.server";
+import { formatHijriDate } from "~/lib/format";
 import { deliverEmail } from "~/lib/email/send.server";
 import { quotaSummary, registerOnline, registrationWindowError } from "~/lib/registration.server";
 import { verifyTurnstile } from "~/lib/turnstile.server";
@@ -42,6 +43,7 @@ export async function loader({ params }: Route.LoaderArgs) {
       theme: event.theme,
       infoUrl: event.info_url,
       startsAt: event.starts_at,
+      startsAtHijri: formatHijriDate(event.starts_at), // computed here so server and browser render the same text
       endsAt: event.ends_at,
       registrationClosesAt: event.registration_closes_at,
       maxFamily: event.max_family,
@@ -57,6 +59,7 @@ export async function loader({ params }: Route.LoaderArgs) {
 
 type ActionData =
   | { ok: false; errors: FieldErrors; message: string; manageLink?: boolean }
+  | { ok: true; kind: "pending_membership"; people: number; email: string }
   | { ok: true; kind: "accepted"; people: number; email: string }
   | {
       ok: true;
@@ -120,8 +123,12 @@ export async function action({ request, params }: Route.ActionArgs) {
   const cfg = emailConfig(appEnv);
 
   switch (result.kind) {
+    case "pending_membership":
+      // Members get a "waiting for validation" notice now; the QR code follows once an admin validates the membership.
+      waitUntil(deliverEmail(appEnv.DB, cfg, result.registrationId, "membership_pending"));
+      return data<ActionData>({ ok: true, kind: "pending_membership", people: result.people, email: parsed.data.email });
     case "accepted":
-      waitUntil(deliverEmail(appEnv.DB, cfg, result.registrationId, "confirmation"));
+      // Only reachable by replaying the idempotency key of a registration made before validation came first.
       return data<ActionData>({ ok: true, kind: "accepted", people: result.people, email: parsed.data.email });
     case "pending_payment":
       waitUntil(deliverEmail(appEnv.DB, cfg, result.registrationId, "payment_instructions"));
@@ -140,7 +147,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         {
           ok: false,
           errors: {},
-          message: `Mohon maaf, kuota tidak mencukupi. Sisa kuota: ${result.remaining} orang; jumlah peserta Anda: ${result.people} orang.`,
+          message: `Mohon maaf, kuota tidak mencukupi. Sisa kuota: ${result.remaining} orang; peserta remaja dan dewasa Anda: ${result.seats} orang (balita dan anak tidak dihitung).`,
         },
         { status: 409 },
       );

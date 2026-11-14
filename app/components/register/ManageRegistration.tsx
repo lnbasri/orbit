@@ -29,7 +29,7 @@ export interface MyRegistration {
   whatsapp: string;
   email: string;
   isMember: boolean;
-  status: "accepted" | "pending_payment";
+  status: "accepted" | "pending_payment" | "pending_membership";
   paymentStatus: string;
   paymentCode: string | null;
   amountCents: number;
@@ -62,7 +62,9 @@ interface Draft {
 const statusLine = (r: MyRegistration) =>
   r.status === "pending_payment"
     ? { label: "Menunggu pembayaran", tone: "text-amber-700", icon: ClockIcon }
-    : { label: r.isMember ? "Diterima – anggota" : "Diterima – lunas", tone: "text-emerald-700", icon: CheckCircleIcon };
+    : r.status === "pending_membership"
+      ? { label: "Menunggu validasi keanggotaan", tone: "text-amber-700", icon: ClockIcon }
+      : { label: r.isMember ? "Diterima – anggota" : "Diterima – lunas", tone: "text-emerald-700", icon: CheckCircleIcon };
 
 export function ManageRegistration({
   registration: r,

@@ -61,7 +61,7 @@ describe("registration window", () => {
     const e = (await getEventById(db, 1))!;
     const ev = { ...e, registration_opens_at: null, registration_closes_at: "2026-11-27T22:59:00.000Z" };
     expect((await registerOnline(db, ev, input(), { now: at("2026-11-27T22:59:00.000Z") })).kind).toBe("closed");
-    expect((await registerOnline(db, ev, input(), { now: at("2026-11-27T22:58:00.000Z") })).kind).toBe("accepted");
+    expect((await registerOnline(db, ev, input(), { now: at("2026-11-27T22:58:00.000Z") })).kind).toBe("pending_membership");
   });
 });
 
@@ -99,7 +99,7 @@ describe("admin: save registration window", () => {
   it("a deadline change takes effect for the next registration immediately", async () => {
     await updateRegistrationWindow(db, "admin@x.nl", 1, "", "2026-11-20T12:00");
     const e = (await getEventById(db, 1))!;
-    expect((await registerOnline(db, e, input(), { now: at("2026-11-20T10:59:00.000Z") })).kind).toBe("accepted");
+    expect((await registerOnline(db, e, input(), { now: at("2026-11-20T10:59:00.000Z") })).kind).toBe("pending_membership");
     expect((await registerOnline(db, e, input(), { now: at("2026-11-20T11:00:00.000Z") })).kind).toBe("closed");
   });
 });

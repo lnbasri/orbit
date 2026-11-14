@@ -72,7 +72,7 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
       whatsapp: reg.whatsapp ?? "",
       email: reg.email ?? session.email,
       isMember: reg.is_member === 1,
-      status: reg.status as "accepted" | "pending_payment",
+      status: reg.status as "accepted" | "pending_payment" | "pending_membership",
       paymentStatus: reg.payment_status,
       paymentCode: reg.payment_code,
       amountCents: reg.amount_cents,

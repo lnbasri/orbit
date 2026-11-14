@@ -1,4 +1,4 @@
-import { payingCount } from "./format";
+import { payingCount, seatCount } from "./format";
 import { SEATS_USED_SQL, getParticipants, seatsUsed, type EventRow, type ParticipantRow, type RegistrationRow } from "./db.server";
 import type { EmailKind } from "./email/send.server";
 import { newId, newTicketToken } from "./ids";
@@ -7,7 +7,8 @@ import type { SelfEditInput } from "./validation";
 /**
  * "Pendaftaran saya": a registrant (signed in per event with an email code) views their ACTIVE registration and,
  * while allowed, edits it themselves (decision 12 Nov 2026):
- *  - members (free, accepted at once): editable until registration closes / the event starts;
+ *  - members (free): editable until registration closes / the event starts, both while the membership still has to be
+ *    validated by the committee ('pending_membership') and after validation (accepted, QR codes issued);
  *  - non-members: editable while the payment is pending and the deadline has not passed; once the committee confirms
  *    the payment it is view-only and changes go by email to the committee (event@ppmedenhaag.nl);
  *  - manual registrations are view-only.
@@ -34,7 +35,7 @@ export function selfEditState(
   const iso = now.toISOString();
   if (reg.source !== "online") return { editable: false, reason: "manual" };
   if (reg.status === "accepted" && reg.payment_status === "paid") return { editable: false, reason: "paid" };
-  const member = reg.status === "accepted" && reg.is_member === 1 && reg.payment_status === "free";
+  const member = (reg.status === "accepted" || reg.status === "pending_membership") && reg.is_member === 1 && reg.payment_status === "free";
   const pending = reg.status === "pending_payment" && reg.payment_status === "pending";
   if (!member && !pending) return { editable: false, reason: "closed" };
   if (pending && (!reg.pay_deadline || reg.pay_deadline <= iso)) return { editable: false, reason: "deadline" };
@@ -46,12 +47,12 @@ export function selfEditState(
   return { editable: true, until: limits.sort()[0] ?? null };
 }
 
-/** The one active registration (accepted / pending_payment) of this email for the event, if any. */
+/** The one active registration (accepted / pending_payment / pending_membership) of this email for the event, if any. */
 export async function getActiveRegistrationByEmail(db: D1Database, eventId: number, email: string) {
   return db
     .prepare(
       `SELECT * FROM registrations
-       WHERE event_id = ? AND lower(email) = lower(?) AND status IN ('accepted', 'pending_payment')
+       WHERE event_id = ? AND lower(email) = lower(?) AND status IN ('accepted', 'pending_payment', 'pending_membership')
        ORDER BY created_at DESC LIMIT 1`,
     )
     .bind(eventId, email)
@@ -60,7 +61,7 @@ export async function getActiveRegistrationByEmail(db: D1Database, eventId: numb
 
 /** Same rule as selfEditState, as SQL on the registrations row (binds: now). */
 const EDITABLE_SQL = `source = 'online' AND (
-    (status = 'accepted' AND is_member = 1 AND payment_status = 'free')
+    (status IN ('accepted', 'pending_membership') AND is_member = 1 AND payment_status = 'free')
     OR (status = 'pending_payment' AND payment_status = 'pending' AND pay_deadline > ?))`;
 
 /** Event still open for edits (binds: now, now). */
@@ -89,7 +90,8 @@ function sameParticipant(p: ParticipantRow, q: SelfEditInput["participants"][num
  * Apply a self-service edit. Everything happens in ONE db.batch, conditional on the revision the form was loaded with,
  * on the registration still being editable and (when people are added) on the quota, so a concurrent admin payment
  * confirmation, expiry, second tab or last-seat race cannot slip in between. The email that reflects the new state
- * (members: confirmation with QR codes; pending: payment instructions) is re-queued in the same batch (outbox rule).
+ * (validated members: confirmation with QR codes; members waiting for validation: the membership notice; pending payment:
+ * payment instructions) is re-queued in the same batch (outbox rule). Quota counts seats (remaja + dewasa only).
  */
 export async function updateOwnRegistration(
   db: D1Database,
@@ -116,6 +118,7 @@ export async function updateOwnRegistration(
   const removed = current.filter((p) => !keptIds.includes(p.id));
   const people = input.participants.length;
   const amountCents = reg.is_member ? 0 : payingCount(input.participants) * event.price_non_member_cents;
+  const seats = seatCount(input.participants);
 
   const participantsChanged =
     removed.length > 0 ||
@@ -132,36 +135,45 @@ export async function updateOwnRegistration(
   const guard = "EXISTS (SELECT 1 FROM registrations WHERE id = ? AND edit_rev = ?)";
   const isMember = reg.is_member === 1;
   const accepted = reg.status === "accepted";
+  const awaitingMembership = reg.status === "pending_membership";
   // WhatsApp is not in any email; every other change re-sends the email that shows the current registration.
   const emailKind: EmailKind | null =
-    participantsChanged || nameChanged ? (accepted ? "confirmation" : "payment_instructions") : null;
+    participantsChanged || nameChanged
+      ? accepted
+        ? "confirmation"
+        : awaitingMembership
+          ? "membership_pending"
+          : "payment_instructions"
+      : null;
 
   const statements: D1PreparedStatement[] = [
     db
       .prepare(
-        `UPDATE registrations SET registrant_name = ?, whatsapp = ?, people = ?, amount_cents = ?, edit_rev = ?, updated_at = ?
-         WHERE id = ? AND lower(email) = lower(?) AND edit_rev IS ? AND ${EDITABLE_SQL}
+        `UPDATE registrations SET registrant_name = ?, whatsapp = ?, people = ?, seats = ?, amount_cents = ?, edit_rev = ?, updated_at = ?
+         WHERE id = ? AND lower(email) = lower(?) AND edit_rev IS ? AND status = ? AND ${EDITABLE_SQL}
            ${opts.ignoreWindow ? "" : `AND ${WINDOW_SQL}`}
-           AND (? <= people
-             OR (${SEATS_USED_SQL}) - people + ? <= (SELECT ${isMember ? "quota_member" : "quota_non_member"} FROM events WHERE id = ?))`,
+           AND (? <= seats
+             OR (${SEATS_USED_SQL}) - seats + ? <= (SELECT ${isMember ? "quota_member" : "quota_non_member"} FROM events WHERE id = ?))`,
       )
       .bind(
         input.registrantName,
         input.whatsapp,
         people,
+        seats,
         amountCents,
         newRev,
         nowIso,
         reg.id,
         email,
         reg.edit_rev,
+        reg.status, // the edit was prepared for this status (an admin validation in between would change it)
         nowIso,
         ...(opts.ignoreWindow ? [] : [nowIso, nowIso]),
-        people,
+        seats,
         event.id,
         isMember ? 1 : 0,
         nowIso,
-        people,
+        seats,
         event.id,
       ),
   ];
@@ -200,7 +212,7 @@ export async function updateOwnRegistration(
             q.name,
             q.ageGroup,
             q.gender,
-            accepted ? "accepted" : "pending_payment",
+            accepted ? "accepted" : awaitingMembership ? "pending_membership" : "pending_payment",
             accepted ? newTicketToken() : null,
             reg.id,
             newRev,
@@ -246,14 +258,14 @@ export async function updateOwnRegistration(
   const freshState = selfEditState(fresh, event, now, opts);
   if (!freshState.editable) return { ok: false, reason: "locked", message: LOCKED[freshState.reason] };
   if (fresh.edit_rev !== reg.edit_rev) return { ok: false, reason: "stale", message: STALE };
-  if (people > fresh.people) {
+  if (seats > fresh.seats) {
     const used = await seatsUsed(db, event.id, isMember, nowIso);
     const quota = isMember ? event.quota_member : event.quota_non_member;
     const free = Math.max(0, quota - used);
     return {
       ok: false,
       reason: "quota",
-      message: `Mohon maaf, kuota tidak mencukupi untuk menambah peserta. Sisa kuota: ${free} orang.`,
+      message: `Mohon maaf, kuota tidak mencukupi untuk menambah peserta remaja/dewasa. Sisa kuota: ${free} orang.`,
     };
   }
   return { ok: false, reason: "stale", message: STALE };

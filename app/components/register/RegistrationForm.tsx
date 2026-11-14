@@ -201,7 +201,7 @@ export function RegistrationForm({
               }}
               onBlur={blur("email")}
               placeholder="nama@email.com"
-              hint="Konfirmasi dan QR Code dikirim ke alamat ini."
+              hint="Konfirmasi dikirim ke alamat ini. QR Code menyusul setelah pembayaran dikonfirmasi atau keanggotaan divalidasi."
               error={errors.email}
             />
             <TextInputField
