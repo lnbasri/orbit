@@ -93,8 +93,8 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
       ? state
       : { editable: false as const, message: lockMessage(state.reason), paid: state.reason === "paid" },
     canAdd: event.self_add_allowed === 1,
-    canCancel:
-      selfEditState(reg, event, new Date(), { ignoreWindow: true }).editable && new Date().toISOString() < event.starts_at,
+    // Cancelling follows the same window as editing (freeze once registration closes, decision 14 Nov 2026).
+    canCancel: state.editable,
     priceCents: event.price_non_member_cents,
     maxFamily: event.max_family,
     bank: reg.status === "pending_payment" && bankConfigured(env) ? bankInfo(env) : null,
@@ -126,7 +126,9 @@ export async function action({ request, params, url }: Route.ActionArgs) {
         { status: 401 },
       );
     }
-    const res = await cancelOwnRegistration(env.DB, event, session.email, String(form.get("rev") ?? ""));
+    const res = await cancelOwnRegistration(env.DB, event, session.email, String(form.get("rev") ?? ""), {
+      ignoreWindow: isDev(env),
+    });
     if (!res.ok) {
       return data<ActionData>(
         { step: "save", result: { ok: false, message: res.message, errors: {} } },

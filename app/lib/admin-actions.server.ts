@@ -1,4 +1,19 @@
 import { addAdmin, removeAdmin } from "./admins.server";
+import { adminCheckin, adminUndoCheckin } from "./checkin.server";
+import { localInputToUtcIso } from "./format";
+import {
+  addScanners,
+  deleteContact,
+  linkScannerParticipant,
+  logoutAllScanners,
+  removeAllScanners,
+  removeScanner,
+  saveContact,
+  setContactActive,
+  setScannerActive,
+  setScannerRole,
+  updateCheckinGate,
+} from "./scanners.server";
 import { updateEventDetails, updateEventLocation, updateEventTimes, updateEventPrice, updateSelfAdd, updateQuotas, updateRegistrationWindow } from "./events.server";
 import { emailConfig, type AppEnv } from "./config.server";
 import { audit, getEventBySlug } from "./db.server";
@@ -58,6 +73,47 @@ export async function handleAdminIntent(env: AppEnv, actor: string, form: FormDa
         ? { ok: true, message: "Email dikirim ulang." }
         : { ok: false, message: `Email gagal dikirim: ${mail.error}` };
     }
+    case "add-scanners":
+      return addScanners(env.DB, actor, String(form.get("emails") ?? ""), form.get("role") === "lead" ? "lead" : "scanner");
+    case "set-scanner-role":
+      return setScannerRole(env.DB, actor, Number(form.get("scannerId")), form.get("role") === "lead" ? "lead" : "scanner");
+    case "set-scanner-active":
+      return setScannerActive(env.DB, actor, Number(form.get("scannerId")), form.get("active") === "1");
+    case "remove-scanner":
+      return removeScanner(env.DB, actor, Number(form.get("scannerId")));
+    case "link-scanner-participant":
+      return linkScannerParticipant(env.DB, actor, Number(form.get("scannerId")), String(form.get("participantId") ?? "") || null);
+    case "logout-all-scanners":
+      return logoutAllScanners(env.DB, actor);
+    case "remove-all-scanners":
+      return removeAllScanners(env.DB, actor);
+    case "save-contact":
+      return saveContact(env.DB, actor, {
+        id: Number(form.get("contactId")) || null,
+        level: String(form.get("level") ?? ""),
+        name: String(form.get("name") ?? ""),
+        roleLabel: String(form.get("roleLabel") ?? ""),
+        phone: String(form.get("phone") ?? ""),
+        note: String(form.get("note") ?? ""),
+      });
+    case "delete-contact":
+      return deleteContact(env.DB, actor, Number(form.get("contactId")));
+    case "set-contact-active":
+      return setContactActive(env.DB, actor, Number(form.get("contactId")), form.get("active") === "1");
+    case "save-checkin-gate": {
+      const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");
+      if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+      const opensRaw = String(form.get("opensAt") ?? "").trim();
+      const closesRaw = String(form.get("closesAt") ?? "").trim();
+      const opens = opensRaw ? localInputToUtcIso(opensRaw) : "";
+      const closes = closesRaw ? localInputToUtcIso(closesRaw) : "";
+      if (opens === null || closes === null) return { ok: false, message: "Format tanggal/jam tidak valid." };
+      return updateCheckinGate(env.DB, actor, event, { enabled: form.get("enabled") === "1", opensAt: opens, closesAt: closes });
+    }
+    case "admin-checkin":
+      return adminCheckin(env.DB, actor, String(form.get("participantId") ?? ""));
+    case "admin-undo-checkin":
+      return adminUndoCheckin(env.DB, actor, String(form.get("participantId") ?? ""));
     case "add-admin":
       return addAdmin(env.DB, actor, String(form.get("email") ?? ""), String(form.get("name") ?? ""));
     case "remove-admin":

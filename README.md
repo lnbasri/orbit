@@ -169,3 +169,12 @@ If nobody can log in (for example the seed was empty and the table is empty), ad
 npx wrangler d1 execute DB --remote --env test --command "INSERT INTO admins (email, added_by, added_at) VALUES ('you@example.com', 'manual', datetime('now'))"
 ```
 Locally: same without `--remote --env test`, or `npm run db:reset:local` (re-seeds from `ADMIN_EMAILS`).
+
+## Check-in (scanner) app
+
+Plan and rules: `../docs/scanner-plan.md`. Served only by the check-in Worker (`ENABLE_CHECKIN="true"`, fails closed): routes `/scan`, `/scan/login`, `/scan/api/:op`, `/scan/manifest.webmanifest`, `/scan/sw.js`.
+
+- Local: `npm run db:migrate:local`, set `DEV_SCANNER_EMAIL` in `.dev.vars` (the email must be in the `scanners` table; migration 0017 seeds the first lead), `npm run dev`, open http://localhost:5173/scan . Leave it empty to test the real email-PIN login (the code prints in the dev terminal).
+- Practice codes `PPME-LATIHAN-01..09` are simulated and never write; print them from /admin/briefing.
+- Deploy: `npm run deploy:test-checkin` / `npm run deploy:production-checkin` (after the migration). The production custom domain, Turnstile hostname and secrets are added by hand: see docs/deploy-runbook.md steps C1-C5.
+- Tests: `tests/checkin.test.ts` (verdict rules, race, undo, revoked tickets, retention) and `tests/scanner-app.test.ts` (login/sessions, team management, ID/NL texts).

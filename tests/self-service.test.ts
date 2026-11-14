@@ -568,11 +568,28 @@ describe("self cancel (delete own registration)", () => {
     expect(await getRegistration(db, b.id)).not.toBeNull();
   });
 
-  it("a member may still cancel after registration closed (frees the seat), unlike editing", async () => {
+  it("self-cancel is frozen once registration closed, like editing (decision 14 Nov 2026)", async () => {
     const a = await register({ people: 1 });
     const afterClose = new Date("2026-11-30T12:00:00.000Z");
     expect(selfEditState((await getRegistration(db, a.id))!, event, afterClose).editable).toBe(false);
-    expect((await cancelOwnRegistration(db, event, a.email, await rev(a.id), { now: afterClose })).ok).toBe(true);
+    expect(await cancelOwnRegistration(db, event, a.email, await rev(a.id), { now: afterClose })).toMatchObject({ ok: false, reason: "locked" });
+    expect(await getRegistration(db, a.id)).not.toBeNull();
+  });
+
+  it("the freeze also starts 1 hour before the event when the registration window is still open", async () => {
+    await db.prepare("UPDATE events SET registration_closes_at = NULL").run();
+    event = (await db.prepare("SELECT * FROM events LIMIT 1").first<EventRow>())!;
+    const a = await register({ people: 1 });
+    const reg = (await getRegistration(db, a.id))!;
+    const before = new Date("2026-12-05T06:59:00.000Z");
+    const after = new Date("2026-12-05T07:01:00.000Z");
+    expect(selfEditState(reg, event, before).editable).toBe(true);
+    expect(selfEditState(reg, event, after)).toEqual({ editable: false, reason: "closed" });
+    // the same rule is enforced inside the SQL, not only in the UI state
+    expect(await cancelOwnRegistration(db, event, a.email, await rev(a.id), { now: after })).toMatchObject({ ok: false, reason: "locked" });
+    const edit = await currentInput(a.id);
+    expect(await updateOwnRegistration(db, event, a.email, await rev(a.id), { ...edit, registrantName: "Nama Baru" }, { now: after })).toMatchObject({ ok: false, reason: "locked" });
+    expect((await cancelOwnRegistration(db, event, a.email, await rev(a.id), { now: before })).ok).toBe(true);
   });
 
   it("a second cancel of the same registration does nothing", async () => {

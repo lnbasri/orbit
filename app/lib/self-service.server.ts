@@ -19,11 +19,18 @@ import type { SelfEditInput } from "./validation";
 export type LockReason = "paid" | "manual" | "deadline" | "closed";
 export type SelfEditState = { editable: true; until: string | null } | { editable: false; reason: LockReason };
 
+/**
+ * Self-service freeze (decision 14 Nov 2026): once registration closes nothing can be changed by the registrant any more
+ * (edit, add, remove, cancel). Backstop: the freeze is also on from 1 hour before the event starts, whichever is first.
+ * Admin actions are not affected.
+ */
+export const EVENT_DAY_LOCK_MS = 60 * 60_000;
+
 export function editWindowClosed(event: EventRow, now: Date): boolean {
   const iso = now.toISOString();
   if (event.status !== "open") return true;
   if (event.registration_closes_at && iso >= event.registration_closes_at) return true;
-  return iso >= event.starts_at;
+  return now.getTime() >= Date.parse(event.starts_at) - EVENT_DAY_LOCK_MS;
 }
 
 export function selfEditState(
@@ -41,7 +48,7 @@ export function selfEditState(
   if (pending && (!reg.pay_deadline || reg.pay_deadline <= iso)) return { editable: false, reason: "deadline" };
   if (!opts.ignoreWindow && editWindowClosed(event, now)) return { editable: false, reason: "closed" };
 
-  const limits = [event.registration_closes_at, event.starts_at, pending ? reg.pay_deadline : null].filter(
+  const limits = [event.registration_closes_at, new Date(Date.parse(event.starts_at) - EVENT_DAY_LOCK_MS).toISOString(), pending ? reg.pay_deadline : null].filter(
     (v): v is string => !!v,
   );
   return { editable: true, until: limits.sort()[0] ?? null };
@@ -64,7 +71,7 @@ const EDITABLE_SQL = `source = 'online' AND (
     (status IN ('accepted', 'pending_membership') AND is_member = 1 AND payment_status = 'free')
     OR (status = 'pending_payment' AND payment_status = 'pending' AND pay_deadline > ?))`;
 
-/** Event still open for edits (binds: now, now). */
+/** Event still open for edits (binds: now, now + 1 hour: the event-day lock). */
 const WINDOW_SQL = `EXISTS (SELECT 1 FROM events e WHERE e.id = registrations.event_id AND e.status = 'open'
     AND (e.registration_closes_at IS NULL OR e.registration_closes_at > ?) AND e.starts_at > ?)`;
 
@@ -106,6 +113,7 @@ export async function updateOwnRegistration(
 ): Promise<SelfEditResult> {
   const now = opts.now ?? new Date();
   const nowIso = now.toISOString();
+  const lockIso = new Date(now.getTime() + EVENT_DAY_LOCK_MS).toISOString();
   const reg = await getActiveRegistrationByEmail(db, event.id, email);
   if (!reg) return { ok: false, reason: "not_found", message: "Tidak ada pendaftaran aktif untuk email ini." };
   const state = selfEditState(reg, event, now, opts);
@@ -175,7 +183,7 @@ export async function updateOwnRegistration(
         reg.edit_rev,
         reg.status, // the edit was prepared for this status (an admin validation in between would change it)
         nowIso,
-        ...(opts.ignoreWindow ? [] : [nowIso, nowIso]),
+        ...(opts.ignoreWindow ? [] : [nowIso, lockIso]),
         seats,
         event.id,
         isMember ? 1 : 0,
@@ -188,6 +196,16 @@ export async function updateOwnRegistration(
   ];
 
   if (removed.length) {
+    // Remember the codes of removed people (scanners then see "ticket cancelled"); same batch, gated on the edit having applied.
+    statements.push(
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO revoked_tickets (code, event_id, reason, revoked_at)
+           SELECT p.qr_token, ?, 'self_removed', ? FROM participants p
+           WHERE p.registration_id = ? AND p.id IN (${removed.map(() => "?").join(", ")}) AND p.qr_token IS NOT NULL AND ${guard}`,
+        )
+        .bind(event.id, nowIso, reg.id, ...removed.map((p) => p.id), reg.id, newRev),
+    );
     statements.push(
       db
         .prepare(
@@ -291,8 +309,10 @@ const CANCEL_STALE = "Data pendaftaran sudah berubah sejak halaman ini dibuka. H
 /**
  * Self-service cancellation: the registrant deletes their OWN registration (all participants, ticket codes, queued emails,
  * their login sessions and codes), which frees every seat in the quota. Allowed for the same registrations that may be
- * edited (online member, or non-member whose payment is still pending before the deadline), also after registration has
- * closed, but not once the event has started, anyone checked in, or the payment was confirmed (paid / manual: via the committee).
+ * edited (online member, or non-member whose payment is still pending before the deadline) and only while the self-service
+ * window is open: NOT after registration closed or within 1 hour of the event start (freeze, 14 Nov 2026), nor once anyone
+ * checked in or the payment was confirmed (paid / manual: via the committee). The ticket codes are recorded in
+ * `revoked_tickets` in the same batch.
  *
  * Everything is ONE db.batch. The audit row is written first and only when the registration is still the one the page showed
  * (edit_rev) and still eligible; every DELETE is gated on that audit row, so it is all-or-nothing and can only touch rows
@@ -303,15 +323,15 @@ export async function cancelOwnRegistration(
   event: EventRow,
   email: string,
   rev: string,
-  opts: { now?: Date } = {},
+  opts: { now?: Date; ignoreWindow?: boolean } = {},
 ): Promise<CancelResult> {
   const now = opts.now ?? new Date();
   const nowIso = now.toISOString();
+  const lockIso = new Date(now.getTime() + EVENT_DAY_LOCK_MS).toISOString();
   const reg = await getActiveRegistrationByEmail(db, event.id, email);
   if (!reg) return { ok: false, reason: "not_found", message: "Tidak ada pendaftaran aktif untuk email ini." };
-  const state = selfEditState(reg, event, now, { ignoreWindow: true });
+  const state = selfEditState(reg, event, now, { ignoreWindow: opts.ignoreWindow });
   if (!state.editable) return { ok: false, reason: "locked", message: LOCKED[state.reason] };
-  if (nowIso >= event.starts_at) return { ok: false, reason: "locked", message: LOCKED.closed };
   if ((reg.edit_rev ?? "") !== rev) return { ok: false, reason: "stale", message: CANCEL_STALE };
 
   const actor = "self-service";
@@ -325,10 +345,17 @@ export async function cancelOwnRegistration(
         `INSERT INTO audit_log (at, actor, action, target, detail)
          SELECT ?, ?, 'registration.self_cancel', ?, ?
          WHERE EXISTS (SELECT 1 FROM registrations WHERE id = ? AND edit_rev IS ? AND status = ? AND ${EDITABLE_SQL})
-           AND EXISTS (SELECT 1 FROM events WHERE id = ? AND starts_at > ?)
+           AND (? = 1 OR EXISTS (SELECT 1 FROM events e WHERE e.id = ? AND e.status = 'open'
+                                 AND (e.registration_closes_at IS NULL OR e.registration_closes_at > ?) AND e.starts_at > ?))
            AND NOT EXISTS (SELECT 1 FROM participants WHERE registration_id = ? AND checked_in_at IS NOT NULL)`,
       )
-      .bind(nowIso, actor, reg.id, detail, reg.id, reg.edit_rev, reg.status, nowIso, event.id, nowIso, reg.id),
+      .bind(nowIso, actor, reg.id, detail, reg.id, reg.edit_rev, reg.status, nowIso, opts.ignoreWindow ? 1 : 0, event.id, nowIso, lockIso, reg.id),
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO revoked_tickets (code, event_id, reason, revoked_at)
+         SELECT p.qr_token, ?, 'self_cancelled', ? FROM participants p WHERE p.registration_id = ? AND p.qr_token IS NOT NULL AND ${logged}`,
+      )
+      .bind(event.id, nowIso, reg.id, ...bindLogged),
     db.prepare(`DELETE FROM participants WHERE registration_id = ? AND ${logged}`).bind(reg.id, ...bindLogged),
     db.prepare(`DELETE FROM email_log WHERE registration_id = ? AND ${logged}`).bind(reg.id, ...bindLogged),
     db.prepare(`DELETE FROM dev_outbox WHERE registration_id = ? AND ${logged}`).bind(reg.id, ...bindLogged),
@@ -345,7 +372,7 @@ export async function cancelOwnRegistration(
   }
   const fresh = await getActiveRegistrationByEmail(db, event.id, email);
   if (!fresh) return { ok: false, reason: "not_found", message: "Tidak ada pendaftaran aktif untuk email ini." };
-  const freshState = selfEditState(fresh, event, now, { ignoreWindow: true });
+  const freshState = selfEditState(fresh, event, now, { ignoreWindow: opts.ignoreWindow });
   if (!freshState.editable) return { ok: false, reason: "locked", message: LOCKED[freshState.reason] };
   return { ok: false, reason: "stale", message: CANCEL_STALE };
 }

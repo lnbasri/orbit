@@ -4,8 +4,10 @@ import {
   Cog6ToothIcon,
   ExclamationTriangleIcon,
   InboxIcon,
+  QrCodeIcon,
   ShieldCheckIcon,
   Squares2X2Icon,
+  UserGroupIcon,
 } from "@heroicons/react/24/outline";
 
 import type { Route } from "./+types/layout";
@@ -67,6 +69,8 @@ export function loader({ context }: Route.LoaderArgs) {
 const NAV: AdminNavItem[] = [
   { to: "/admin", label: "Ringkasan", icon: Squares2X2Icon, end: true },
   { to: "/admin/registrations", label: "Pendaftaran", icon: ClipboardDocumentListIcon, end: false },
+  { to: "/admin/checkin", label: "Check-in", icon: QrCodeIcon, end: false },
+  { to: "/admin/scanners", label: "Petugas", icon: UserGroupIcon, end: false },
   { to: "/admin/settings", label: "Pengaturan", icon: Cog6ToothIcon, end: false },
   { to: "/admin/admins", label: "Admin", icon: ShieldCheckIcon, end: false },
 ];
@@ -77,7 +81,9 @@ export default function AdminLayout({ loaderData }: Route.ComponentProps) {
     : NAV;
   return (
     <Backdrop>
-      <AdminHeader items={items} email={loaderData.email} dev={loaderData.dev} canLogout={loaderData.canLogout} />
+      <div className="print:hidden">
+        <AdminHeader items={items} email={loaderData.email} dev={loaderData.dev} canLogout={loaderData.canLogout} />
+      </div>
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10">
         <Outlet />
       </main>

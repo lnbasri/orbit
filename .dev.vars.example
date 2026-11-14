@@ -19,3 +19,6 @@ ADMIN_EMAILS=admin@example.com
 # Optional Google sign-in (also set GOOGLE_CLIENT_ID in wrangler.jsonc vars). Local redirect URI:
 # http://localhost:5173/admin/auth/google/callback
 GOOGLE_CLIENT_SECRET=
+
+# Local only: act as this scanner in the check-in app (/scan). The email must exist in the scanners table. Leave empty to test the real PIN login.
+DEV_SCANNER_EMAIL=

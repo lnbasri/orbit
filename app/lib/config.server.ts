@@ -27,11 +27,21 @@ export interface AppEnv {
   ENABLE_PUBLIC?: string;
   /** "false" turns /admin off on this Worker (public-only Worker). */
   ENABLE_ADMIN?: string;
+  /** Scanner / check-in app (/scan). Fails closed: only the string "true" turns it on (and local development, unless "false"). */
+  ENABLE_CHECKIN?: string;
+  /** Development only: skip the scanner login and act as this scanner (must exist in the scanners table). */
+  DEV_SCANNER_EMAIL?: string;
 }
 
-/** Which parts of the app this Worker serves. Anything other than the string "false" means on. */
+/** Which parts of the app this Worker serves. Public and admin: anything other than the string "false" means on. */
 export function featureEnabled(env: Pick<AppEnv, "ENABLE_PUBLIC" | "ENABLE_ADMIN">, feature: "public" | "admin") {
   return (feature === "public" ? env.ENABLE_PUBLIC : env.ENABLE_ADMIN)?.trim().toLowerCase() !== "false";
+}
+
+/** The scanner app is opt-in (fails closed): only a Worker with ENABLE_CHECKIN="true" serves /scan; local dev serves it unless switched off. */
+export function checkinEnabled(env: Pick<AppEnv, "ENABLE_CHECKIN" | "APP_ENV">) {
+  const v = env.ENABLE_CHECKIN?.trim().toLowerCase();
+  return v === "true" || (env.APP_ENV === "development" && v !== "false");
 }
 
 export function isDev(env: AppEnv) {
