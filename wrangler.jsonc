@@ -230,12 +230,13 @@
 		// ---- PRODUCTION-CHECKIN: the scanner app for D-day, same D1 as `production`, no cron.
 		// Intended host: https://event-checkin.ppmedenhaag.nl. The custom domain is attached by hand (dashboard: Workers > ppme-event-checkin >
 		// Settings > Domains & Routes), NOT by this file, so nothing is exposed before the Turnstile hostname and the secrets are in place.
-		// Once it exists, add this line below so later deploys keep it:  "routes": [{ "pattern": "event-checkin.ppmedenhaag.nl", "custom_domain": true }],
+		// The domain was attached on 14 Nov 2026 and is now kept in config (the route below), so later deploys do not drop it.
 		// Secrets (wrangler secret put <NAME> --env production-checkin): TURNSTILE_SECRET, RESEND_API_KEY.
 		"production-checkin": {
 			"name": "ppme-event-checkin",
 			"workers_dev": false,
 			"preview_urls": false,
+			"routes": [{ "pattern": "event-checkin.ppmedenhaag.nl", "custom_domain": true }],
 			"triggers": { "crons": [] },
 			"d1_databases": [
 				{
