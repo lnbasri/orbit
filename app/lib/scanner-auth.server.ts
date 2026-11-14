@@ -32,13 +32,14 @@ export interface ScannerAuthEnv {
 
 type ScannerJoin = { id: number; email: string; name: string | null; role: ScannerRole; participant_id: string | null };
 
-const toIdentity = (row: ScannerJoin, deviceLabel: string | null): ScannerIdentity => ({
+const toIdentity = (row: ScannerJoin, deviceLabel: string | null, sessionHash?: string): ScannerIdentity => ({
   id: row.id,
   email: row.email,
   name: row.name,
   role: row.role,
   participantId: row.participant_id,
   deviceLabel,
+  sessionHash,
 });
 
 export function scannerSessionCookie(request: Request, token: string) {
@@ -95,14 +96,15 @@ export async function identifyScanner(
   }
   const token = readCookie(request, cookieName(isSecureRequest(request)));
   if (!token || token.length < 32 || token.length > 128) return null;
+  const hash = await sha256Hex(token);
   const row = await env.DB.prepare(
     `SELECT s.id, s.email, s.name, s.role, s.participant_id, ss.device_label
      FROM scanner_sessions ss JOIN scanners s ON s.id = ss.scanner_id
      WHERE ss.token_hash = ? AND ss.expires_at > ? AND s.active = 1`,
   )
-    .bind(await sha256Hex(token), now.toISOString())
+    .bind(hash, now.toISOString())
     .first<ScannerJoin & { device_label: string | null }>();
-  return row ? toIdentity(row, row.device_label) : null;
+  return row ? toIdentity(row, row.device_label, hash) : null;
 }
 
 export async function destroyScannerSession(db: D1Database, request: Request) {

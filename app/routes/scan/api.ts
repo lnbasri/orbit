@@ -9,6 +9,8 @@ import {
   recordEscalation,
   undoCheckin,
 } from "~/lib/checkin.server";
+import { leadSummary, myTotals, scannerStats, teamOverview, touchScannerSession } from "~/lib/checkin-insights.server";
+import { isReportedState } from "~/lib/scanner-presence";
 import { saveSelfTest } from "~/lib/scanners.server";
 import { json, requireScannerApi } from "~/lib/scanner-guard.server";
 
@@ -28,6 +30,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (params.op === "stats") {
     const s = await checkinStats(env.DB, event.id);
     return json({ expected: s.expected, inside: s.inside, gate: gateState(event, new Date()) });
+  }
+  if (params.op === "me") return json({ ok: true, stats: await scannerStats(env.DB, event.id, scanner.id) });
+  if (params.op === "team") {
+    // Team progress and phone status are for team leads only.
+    if (scanner.role !== "lead") return json({ error: "forbidden" }, 403);
+    return json({ ok: true, team: await teamOverview(env.DB, event, new Date()), now: new Date().toISOString() });
   }
   return json({ error: "not_found" }, 404);
 }
@@ -51,6 +59,14 @@ export async function action({ request, params }: Route.ActionArgs) {
   const b = await body(request);
 
   switch (params.op) {
+    case "pulse": {
+      // Heartbeat every ~20 s: records this phone's state and returns the numbers the home screen shows.
+      const state = isReportedState(b.state) ? b.state : "idle";
+      await touchScannerSession(env.DB, scanner, state);
+      const [stats, mine] = await Promise.all([checkinStats(env.DB, event.id), myTotals(env.DB, event.id, scanner.id)]);
+      const lead = scanner.role === "lead" ? leadSummary(await teamOverview(env.DB, event, new Date())) : null;
+      return json({ ok: true, expected: stats.expected, inside: stats.inside, gate: gateState(event, new Date()), mine, lead });
+    }
     case "lookup": {
       const result = await lookupTicket(env.DB, event, scanner, str(b.code, 80));
       if ("rateLimited" in result) return json({ error: "rate_limited" }, 429);

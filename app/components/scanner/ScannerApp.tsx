@@ -5,6 +5,7 @@ import {
   BeakerIcon,
   BookOpenIcon,
   Bars3Icon,
+  ChartBarIcon,
   CheckCircleIcon,
   CheckIcon,
   DevicePhoneMobileIcon,
@@ -15,6 +16,7 @@ import {
   SignalSlashIcon,
   SpeakerWaveIcon,
   SpeakerXMarkIcon,
+  UserGroupIcon,
   WrenchScrewdriverIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
@@ -33,14 +35,32 @@ import { HowTo, InstallGuide } from "./Info";
 import { LangSwitch, useT } from "./lang";
 import { QrCamera, type CameraState } from "./QrCamera";
 import { SelfTest } from "./SelfTest";
+import { MyStatsScreen, TeamScreen } from "./Stats";
 import { VerdictView, type DenyChoice } from "./VerdictView";
 
-type Screen = "scan" | "selftest" | "howto" | "install";
+type Screen = "scan" | "selftest" | "howto" | "install" | "mystats" | "team";
 type View =
   | { kind: "scanning" }
   | { kind: "checking" }
   | { kind: "verdict"; code: string; result: LookupResult; notice?: string }
   | { kind: "done"; name: string; count: number; ids: string[]; practice: boolean };
+
+interface LeadSummary {
+  working: number;
+  total: number;
+  problem: number;
+  quiet: number;
+  remainingRegistrations: number;
+  remainingPeople: number;
+  etaMinutes: number | null;
+}
+
+interface PulseResponse {
+  inside: number;
+  expected: number;
+  mine: { people: number; registrations: number };
+  lead: LeadSummary | null;
+}
 
 interface Props {
   scanner: { name: string | null; email: string; role: "scanner" | "lead" };
@@ -61,10 +81,14 @@ export function ScannerApp({ scanner, contacts }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<{ inside: number; expected: number } | null>(null);
+  const [mine, setMine] = useState<{ people: number; registrations: number } | null>(null);
+  const [lead, setLead] = useState<LeadSummary | null>(null);
   const [undo, setUndo] = useState<{ ids: string[]; practice: boolean } | null>(null);
   const [camera, setCamera] = useState<CameraState>("idle");
   const [standalone, setStandalone] = useState(false);
   const verdictRequest = useRef<{ code: string; id: string } | null>(null);
+  // The guest's QR often stays in front of the camera after the tap: ignore that code for a few seconds so it is not read again.
+  const justAdmitted = useRef<{ code: string; until: number } | null>(null);
   const lastEscalationRef = useRef<{ participantId: string | null; reason: string | null }>({ participantId: null, reason: null });
 
   const isLead = scanner.role === "lead";
@@ -100,21 +124,42 @@ export function ScannerApp({ scanner, contacts }: Props) {
     [T],
   );
 
-  // Live counter (every 20 s while scanning).
+  // Heartbeat every 20 s: tells the server this phone is alive and what it is doing (so a team lead can see which phones work),
+  // and brings back the counters. A failed heartbeat is also how the app notices it lost the connection.
+  const pulseState: "scanning" | "idle" | "camera_problem" =
+    started && (camera === "denied" || camera === "error" || camera === "unsupported")
+      ? "camera_problem"
+      : screen === "scan" && started && camera === "running"
+        ? "scanning"
+        : "idle";
   useEffect(() => {
-    if (screen !== "scan" || !online) return;
     let live = true;
-    const load = async () => {
-      const res = await api<{ inside: number; expected: number }>("stats");
-      if (live && res.ok) setStats({ inside: res.data.inside, expected: res.data.expected });
+    const send = async () => {
+      const res = await api<PulseResponse>("pulse", { state: document.hidden ? "background" : pulseState });
+      if (!live) return;
+      if (res.ok) {
+        setOnline(true);
+        setStats({ inside: res.data.inside, expected: res.data.expected });
+        setMine(res.data.mine);
+        setLead(res.data.lead);
+      } else if (res.kind === "session") window.location.href = "/scan/login";
+      else if (res.kind === "offline") setOnline(false);
     };
-    void load();
-    const id = setInterval(load, 20_000);
+    void send();
+    const id = setInterval(send, 20_000);
+    const onVisibility = () => {
+      if (document.hidden) {
+        // Tell the server we are leaving: the lead sees "inactive" at once instead of waiting for the silence.
+        navigator.sendBeacon?.("/scan/api/pulse", new Blob([JSON.stringify({ state: "background" })], { type: "application/json" }));
+      } else void send();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       live = false;
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [screen, online, view.kind]);
+  }, [pulseState, view.kind]);
 
   // Undo toast disappears after 10 seconds (the server allows 2 minutes).
   useEffect(() => {
@@ -143,6 +188,7 @@ export function ScannerApp({ scanner, contacts }: Props) {
   function onCode(raw: string) {
     if (view.kind !== "scanning" || busy) return;
     const code = raw.trim().toUpperCase();
+    if (justAdmitted.current && justAdmitted.current.code === code && Date.now() < justAdmitted.current.until) return;
     const isPracticeCode = /^PPME-LATIHAN-0[1-9]$/.test(code);
     if (!isPracticeCode && !TICKET_TOKEN_PATTERN.test(code)) {
       setError(T("errBadQr"));
@@ -176,6 +222,7 @@ export function ScannerApp({ scanner, contacts }: Props) {
       const name = view.result.person?.name ?? "";
       setView({ kind: "done", name, count: admitted.length, ids: admitted.map((i) => i.id), practice: !!view.result.practice });
       setUndo({ ids: admitted.map((i) => i.id), practice: !!view.result.practice });
+      justAdmitted.current = { code: view.code, until: Date.now() + 8000 };
       setTimeout(() => setView((v) => (v.kind === "done" ? { kind: "scanning" } : v)), 1300);
       return;
     }
@@ -232,15 +279,39 @@ export function ScannerApp({ scanner, contacts }: Props) {
     }
   }
 
+  /** Undo / notice toast. Shown on the scan screen (bottom) and over the verdict screen (top), so Undo never disappears. */
+  const toastEl = (pos: "top" | "bottom") =>
+    undo || notice ? (
+      <div
+        className={`pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4 ${pos === "bottom" ? "bottom-0 pb-[max(1rem,env(safe-area-inset-bottom))]" : "top-0 pt-[max(0.75rem,env(safe-area-inset-top))]"}`}
+      >
+        <div className="pointer-events-auto flex w-full max-w-md items-center justify-between gap-3 border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-white shadow-lg" role="status">
+          <span className="flex items-center gap-2">
+            <CheckIcon className="size-4 text-emerald-400" aria-hidden="true" />
+            {undo ? (undo.ids.length > 1 ? T("admittedN", { n: undo.ids.length }) : T("admitted")) : notice}
+          </span>
+          {undo ? (
+            <button type="button" onClick={doUndo} className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-white/30 px-3 font-semibold hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
+              <ArrowUturnLeftIcon className="size-4" aria-hidden="true" />
+              {T("undo")}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    ) : null;
+
   // -------------------------------------------------------------- screens
 
   if (screen === "selftest") return <SelfTest onBack={() => setScreen("scan")} />;
   if (screen === "howto") return <HowTo onBack={() => setScreen("scan")} />;
   if (screen === "install") return <InstallGuide onBack={() => setScreen("scan")} standalone={standalone} />;
+  if (screen === "mystats") return <MyStatsScreen onBack={() => setScreen("scan")} />;
+  if (screen === "team" && isLead) return <TeamScreen onBack={() => setScreen("scan")} />;
 
   if (view.kind === "verdict") {
     return (
       <>
+        {toastEl("top")}
         {view.notice ? (
           <div className="fixed inset-x-0 top-0 z-20 bg-slate-900 px-4 py-2.5 text-center text-sm font-medium text-white">{view.notice}</div>
         ) : null}
@@ -360,10 +431,30 @@ export function ScannerApp({ scanner, contacts }: Props) {
             </Callout>
           ) : null}
 
-          <div className="mt-auto flex items-center justify-between gap-3 border-t border-slate-200/80 pt-3 text-sm">
-            <p className="font-medium text-slate-700 tabular-nums">
-              {stats ? T("insideCount", { inside: stats.inside, expected: stats.expected }) : " "}
-            </p>
+          {isLead && lead ? (
+            <button
+              type="button"
+              onClick={() => setScreen("team")}
+              className={`mt-auto flex w-full items-center gap-3 border px-3 py-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+                lead.problem > 0 ? "border-red-300 bg-red-50/70 text-red-900" : lead.quiet > 0 ? "border-amber-300 bg-amber-50/70 text-amber-950" : "border-slate-200 bg-white/85 text-slate-700"
+              }`}
+            >
+              <UserGroupIcon className="size-5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 font-medium">
+                {lead.remainingRegistrations === 0
+                  ? T("leadStripDone", { working: lead.working, total: lead.total })
+                  : lead.etaMinutes === null
+                    ? T("leadStripNoEta", { working: lead.working, total: lead.total, regs: lead.remainingRegistrations })
+                    : T("leadStrip", { working: lead.working, total: lead.total, regs: lead.remainingRegistrations, eta: lead.etaMinutes })}
+              </span>
+            </button>
+          ) : null}
+
+          <div className={`${isLead && lead ? "" : "mt-auto "}flex items-center justify-between gap-3 border-t border-slate-200/80 pt-3 text-sm`}>
+            <div>
+              <p className="font-medium text-slate-700 tabular-nums">{stats ? T("insideCount", { inside: stats.inside, expected: stats.expected }) : " "}</p>
+              {mine && mine.people > 0 ? <p className="text-xs text-slate-500 tabular-nums">{T("myCountLine", { n: mine.people })}</p> : null}
+            </div>
             <button type="button" onClick={() => setHelpOpen(true)} className={buttonClass("ghost", "sm", "-mr-2")}>
               <LifebuoyIcon className="size-4" aria-hidden="true" />
               {T("helpButton")}
@@ -371,22 +462,7 @@ export function ScannerApp({ scanner, contacts }: Props) {
           </div>
         </main>
 
-        {undo || notice ? (
-          <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            <div className="pointer-events-auto flex w-full max-w-md items-center justify-between gap-3 border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-white shadow-lg" role="status">
-              <span className="flex items-center gap-2">
-                <CheckIcon className="size-4 text-emerald-400" aria-hidden="true" />
-                {undo ? (undo.ids.length > 1 ? T("admittedN", { n: undo.ids.length }) : T("admitted")) : notice}
-              </span>
-              {undo ? (
-                <button type="button" onClick={doUndo} className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-white/30 px-3 font-semibold hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
-                  <ArrowUturnLeftIcon className="size-4" aria-hidden="true" />
-                  {T("undo")}
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
+        {toastEl("bottom")}
       </div>
 
       <Menu
@@ -442,6 +518,8 @@ function Menu({
 }) {
   const T = useT();
   const items: { key: TextKey; icon: typeof CheckIcon; onClick: () => void; hint?: string }[] = [
+    { key: "mMyStats", icon: ChartBarIcon, onClick: () => go("mystats") },
+    ...(isLead ? [{ key: "mTeam" as TextKey, icon: UserGroupIcon, onClick: () => go("team") }] : []),
     { key: "mSelftest", icon: WrenchScrewdriverIcon, onClick: () => go("selftest") },
     { key: "mPractice", icon: BeakerIcon, onClick: onPractice },
     { key: "mHowto", icon: BookOpenIcon, onClick: () => go("howto") },
