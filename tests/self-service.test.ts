@@ -11,7 +11,8 @@ import {
   verifyRegistrantCode,
 } from "../app/lib/registrant-access.server";
 import { quotaSummary, registerOnline } from "../app/lib/registration.server";
-import { selfEditState, updateOwnRegistration } from "../app/lib/self-service.server";
+import { updateSelfAdd } from "../app/lib/events.server";
+import { cancelOwnRegistration, selfEditState, updateOwnRegistration } from "../app/lib/self-service.server";
 import { selfEditSchema, type SelfEditInput } from "../app/lib/validation";
 import { T0, emailCfg, hours, input, resetDb, startDb } from "./helpers";
 
@@ -29,6 +30,8 @@ beforeEach(async () => {
     .prepare("UPDATE events SET status = 'open', registration_closes_at = ?, starts_at = ?")
     .bind("2026-11-27T22:59:00.000Z", "2026-12-05T08:00:00.000Z")
     .run();
+  // adding participants is off by default (quota control); the existing edit tests need it on, the new tests also test off
+  await db.prepare("UPDATE events SET self_add_allowed = 1").run();
   event = (await db.prepare("SELECT * FROM events LIMIT 1").first<EventRow>())!;
 });
 
@@ -370,5 +373,213 @@ describe("non-member self-service edit", () => {
     expect(selfEditState(reg, event, late)).toEqual({ editable: false, reason: "deadline" });
     const edit = { ...(await currentInput(id)), registrantName: "Telat" };
     expect(await updateOwnRegistration(db, event, email, "", edit, { now: late })).toMatchObject({ ok: false, reason: "locked" });
+  });
+});
+
+describe("admin switch: registrants may add new participants (default off)", () => {
+  const off = async () => {
+    await db.prepare("UPDATE events SET self_add_allowed = 0").run();
+    event = (await db.prepare("SELECT * FROM events LIMIT 1").first<EventRow>())!;
+  };
+
+  it("the column defaults to off", async () => {
+    const row = await db
+      .prepare("SELECT dflt_value FROM pragma_table_info('events') WHERE name = 'self_add_allowed'")
+      .first<{ dflt_value: string }>();
+    expect(row?.dflt_value).toBe("0");
+  });
+
+  it("off: adding is refused (nothing changes, quota untouched); renaming and removing still work", async () => {
+    await off();
+    const { id, email } = await register({ people: 2 });
+    const used = (await quotaSummary(db, event)).member.used;
+
+    const add = await currentInput(id);
+    add.participants.push({ name: "Orang Baru", gender: "laki-laki", ageGroup: "dewasa" });
+    const refused = await updateOwnRegistration(db, event, email, await rev(id), add, { now: T0 });
+    expect(refused).toMatchObject({ ok: false, reason: "add_disabled" });
+    expect(await getParticipants(db, id)).toHaveLength(2);
+    expect((await quotaSummary(db, event)).member.used).toBe(used);
+
+    const edit = await currentInput(id);
+    edit.participants[1].name = "Nama Diganti";
+    expect(await updateOwnRegistration(db, event, email, await rev(id), edit, { now: T0 })).toMatchObject({ ok: true, changed: true });
+    const remove = await currentInput(id);
+    remove.participants = remove.participants.slice(0, 1);
+    expect(await updateOwnRegistration(db, event, email, await rev(id), remove, { now: T0 })).toMatchObject({ ok: true, changed: true });
+    expect(await getParticipants(db, id)).toHaveLength(1);
+  });
+
+  it("off: swapping a participant for a new one is also an add and is refused", async () => {
+    await off();
+    const { id, email } = await register({ people: 2 });
+    const swap = await currentInput(id);
+    swap.participants = [swap.participants[0], { name: "Pengganti", gender: "perempuan", ageGroup: "dewasa" }];
+    expect(await updateOwnRegistration(db, event, email, await rev(id), swap, { now: T0 })).toMatchObject({ ok: false, reason: "add_disabled" });
+    expect((await getParticipants(db, id)).map((p) => p.full_name)).not.toContain("Pengganti");
+  });
+
+  it("the SQL itself refuses an add when the switch flips off after the event row was read", async () => {
+    const { id, email } = await register({ people: 1 });
+    const stale = event; // loaded while on
+    await db.prepare("UPDATE events SET self_add_allowed = 0").run();
+    const add = await currentInput(id);
+    add.participants.push({ name: "Orang Baru", gender: "laki-laki", ageGroup: "dewasa" });
+    expect(await updateOwnRegistration(db, stale, email, await rev(id), add, { now: T0 })).toMatchObject({ ok: false, reason: "add_disabled" });
+    expect(await getParticipants(db, id)).toHaveLength(1);
+  });
+
+  it("on (admin toggle, audited): adding works again and is still checked against the quota", async () => {
+    await off();
+    const { id, email } = await register({ people: 1 });
+    expect((await updateSelfAdd(db, "admin@test", event.id, true, T0)).ok).toBe(true);
+    event = (await db.prepare("SELECT * FROM events LIMIT 1").first<EventRow>())!;
+    expect(event.self_add_allowed).toBe(1);
+    const add = await currentInput(id);
+    add.participants.push({ name: "Orang Baru", gender: "laki-laki", ageGroup: "dewasa" });
+    expect(await updateOwnRegistration(db, event, email, await rev(id), add, { now: T0 })).toMatchObject({ ok: true, changed: true });
+
+    // quota is still enforced while on
+    await db.prepare("UPDATE events SET quota_member = ?").bind((await quotaSummary(db, event)).member.used).run();
+    event = (await db.prepare("SELECT * FROM events LIMIT 1").first<EventRow>())!;
+    const more = await currentInput(id);
+    more.participants.push({ name: "Terlalu Banyak", gender: "laki-laki", ageGroup: "dewasa" });
+    expect(await updateOwnRegistration(db, event, email, await rev(id), more, { now: T0 })).toMatchObject({ ok: false, reason: "quota" });
+
+    expect((await updateSelfAdd(db, "admin@test", event.id, false, T0)).ok).toBe(true);
+    const audits = await db
+      .prepare("SELECT actor, detail FROM audit_log WHERE action = 'event.self_add' ORDER BY id")
+      .all<{ actor: string; detail: string }>();
+    expect(audits.results.map((a) => [a.actor, a.detail])).toEqual([
+      ["admin@test", JSON.stringify({ from: 0, to: 1 })],
+      ["admin@test", JSON.stringify({ from: 1, to: 0 })],
+    ]);
+  });
+});
+
+describe("self cancel (delete own registration)", () => {
+  const count = (sql: string, ...b: unknown[]) =>
+    db.prepare(sql).bind(...b).first<{ n: number }>().then((r) => r!.n);
+
+  it("deletes only the own registration (participants, emails, sessions, codes), frees its seats, audits without personal data", async () => {
+    const a = await register({ people: 3 });
+    const b = await register({ people: 2 });
+    const c = await register({ membership: "Tidak", people: 2 }, false);
+    for (const x of [a, b]) await requestRegistrantCode(db, cfg, event, x.email, meta, T0);
+    await createRegistrantSession(db, event.id, a.email, meta, T0);
+    await createRegistrantSession(db, event.id, b.email, meta, T0);
+    const before = await quotaSummary(db, event);
+    const aSeats = (await getRegistration(db, a.id))!.seats;
+    expect(aSeats).toBeGreaterThan(0);
+    const bTokens = (await getParticipants(db, b.id)).map((p) => p.qr_token);
+    const bEmails = await count("SELECT COUNT(*) n FROM email_log WHERE registration_id = ?", b.id);
+    const regsBefore = await count("SELECT COUNT(*) n FROM registrations");
+    const aName = (await getRegistration(db, a.id))!.registrant_name;
+
+    const res = await cancelOwnRegistration(db, event, a.email, await rev(a.id), { now: T0 });
+    expect(res.ok).toBe(true);
+
+    // A is gone, completely
+    expect(await getRegistration(db, a.id)).toBeNull();
+    expect(await count("SELECT COUNT(*) n FROM participants WHERE registration_id = ?", a.id)).toBe(0);
+    expect(await count("SELECT COUNT(*) n FROM email_log WHERE registration_id = ?", a.id)).toBe(0);
+    expect(await count("SELECT COUNT(*) n FROM dev_outbox WHERE registration_id = ?", a.id)).toBe(0);
+    expect(await count("SELECT COUNT(*) n FROM registrant_sessions WHERE email = ?", a.email)).toBe(0);
+    expect(await count("SELECT COUNT(*) n FROM registrant_login_codes WHERE email = ?", a.email)).toBe(0);
+
+    // everybody else is untouched
+    expect(await count("SELECT COUNT(*) n FROM registrations")).toBe(regsBefore - 1);
+    expect((await getRegistration(db, b.id))!.status).toBe("accepted");
+    expect((await getParticipants(db, b.id)).map((p) => p.qr_token)).toEqual(bTokens);
+    expect(await count("SELECT COUNT(*) n FROM email_log WHERE registration_id = ?", b.id)).toBe(bEmails);
+    expect(await count("SELECT COUNT(*) n FROM registrant_sessions WHERE email = ?", b.email)).toBe(1);
+    expect(await count("SELECT COUNT(*) n FROM registrant_login_codes WHERE email = ?", b.email)).toBe(1);
+    expect(await getParticipants(db, c.id)).toHaveLength(2);
+    expect((await getRegistration(db, c.id))!.status).toBe("pending_payment");
+
+    // A's seats are free again, only A's
+    const after = await quotaSummary(db, event);
+    expect(after.member.used).toBe(before.member.used - aSeats);
+    expect(after.nonMember.used).toBe(before.nonMember.used);
+
+    // audit row exists, without name or email
+    const audit = await db
+      .prepare("SELECT actor, target, detail FROM audit_log WHERE action = 'registration.self_cancel'")
+      .all<{ actor: string; target: string; detail: string }>();
+    expect(audit.results).toHaveLength(1);
+    expect(audit.results[0].target).toBe(a.id);
+    expect(JSON.stringify(audit.results[0])).not.toContain(aName);
+    expect(JSON.stringify(audit.results[0])).not.toContain(a.email);
+    expect(JSON.parse(audit.results[0].detail)).toMatchObject({ status: "accepted", people: 3, member: true });
+
+    // the same email can register again
+    const again = await registerOnline(db, event, input({ email: a.email }), { now: T0, ignoreWindow: true });
+    expect(again.kind).toBe("pending_membership");
+  });
+
+  it("cannot touch another registration: the target always comes from the signed-in email and its revision", async () => {
+    const a = await register({ people: 1 });
+    const b = await register({ people: 1 });
+    const eb = await currentInput(b.id);
+    eb.registrantName = "B Diubah";
+    expect((await updateOwnRegistration(db, event, b.email, "", eb, { now: T0 })).ok).toBe(true); // B now has a revision
+    const res = await cancelOwnRegistration(db, event, a.email, await rev(b.id), { now: T0 }); // B's revision, A's email
+    expect(res).toMatchObject({ ok: false, reason: "stale" });
+    expect(await getRegistration(db, a.id)).not.toBeNull();
+    expect(await getRegistration(db, b.id)).not.toBeNull();
+    expect(await cancelOwnRegistration(db, event, "nobody@example.com", "", { now: T0 })).toMatchObject({ ok: false, reason: "not_found" });
+    expect(await count("SELECT COUNT(*) n FROM audit_log WHERE action = 'registration.self_cancel'")).toBe(0);
+  });
+
+  it("refuses a stale revision (edited in another tab)", async () => {
+    const a = await register({ people: 1 });
+    const stale = await rev(a.id);
+    const edit = await currentInput(a.id);
+    edit.registrantName = "Diubah";
+    expect((await updateOwnRegistration(db, event, a.email, stale, edit, { now: T0 })).ok).toBe(true);
+    expect(await cancelOwnRegistration(db, event, a.email, stale, { now: T0 })).toMatchObject({ ok: false, reason: "stale" });
+    expect(await getRegistration(db, a.id)).not.toBeNull();
+  });
+
+  it("a non-member with a pending payment can cancel before the deadline, not after", async () => {
+    const a = await register({ membership: "Tidak", people: 2 }, false);
+    expect(await cancelOwnRegistration(db, event, a.email, await rev(a.id), { now: hours(48) })).toMatchObject({ ok: false, reason: "locked" });
+    expect(await getRegistration(db, a.id)).not.toBeNull();
+    expect((await cancelOwnRegistration(db, event, a.email, await rev(a.id), { now: T0 })).ok).toBe(true);
+    expect(await getRegistration(db, a.id)).toBeNull();
+  });
+
+  it("refuses once the payment is confirmed (changes go through the committee) and keeps everything", async () => {
+    const a = await register({ membership: "Tidak", people: 2 }, false);
+    expect((await confirmPayment(db, a.id, "admin@test", T0)).ok).toBe(true);
+    expect(await cancelOwnRegistration(db, event, a.email, await rev(a.id), { now: T0 })).toMatchObject({ ok: false, reason: "locked" });
+    expect((await getRegistration(db, a.id))!.status).toBe("accepted");
+    expect(await getParticipants(db, a.id)).toHaveLength(2);
+  });
+
+  it("refuses when someone was already checked in, and after the event started", async () => {
+    const a = await register({ people: 2 });
+    await db.prepare("UPDATE participants SET checked_in_at = ? WHERE registration_id = ? AND position = 1").bind(T0.toISOString(), a.id).run();
+    expect((await cancelOwnRegistration(db, event, a.email, await rev(a.id), { now: T0 })).ok).toBe(false);
+    expect(await getParticipants(db, a.id)).toHaveLength(2);
+
+    const b = await register({ people: 1 });
+    expect(await cancelOwnRegistration(db, event, b.email, await rev(b.id), { now: new Date("2026-12-05T09:00:00.000Z") })).toMatchObject({ ok: false, reason: "locked" });
+    expect(await getRegistration(db, b.id)).not.toBeNull();
+  });
+
+  it("a member may still cancel after registration closed (frees the seat), unlike editing", async () => {
+    const a = await register({ people: 1 });
+    const afterClose = new Date("2026-11-30T12:00:00.000Z");
+    expect(selfEditState((await getRegistration(db, a.id))!, event, afterClose).editable).toBe(false);
+    expect((await cancelOwnRegistration(db, event, a.email, await rev(a.id), { now: afterClose })).ok).toBe(true);
+  });
+
+  it("a second cancel of the same registration does nothing", async () => {
+    const a = await register({ people: 1 });
+    const r = await rev(a.id);
+    expect((await cancelOwnRegistration(db, event, a.email, r, { now: T0 })).ok).toBe(true);
+    expect(await cancelOwnRegistration(db, event, a.email, r, { now: T0 })).toMatchObject({ ok: false, reason: "not_found" });
+    expect(await count("SELECT COUNT(*) n FROM audit_log WHERE action = 'registration.self_cancel'")).toBe(1);
   });
 });

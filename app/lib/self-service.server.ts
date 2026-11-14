@@ -71,7 +71,10 @@ const WINDOW_SQL = `EXISTS (SELECT 1 FROM events e WHERE e.id = registrations.ev
 export type SelfEditResult =
   | { ok: true; changed: false }
   | { ok: true; changed: true; registrationId: string; email: EmailKind | null; people: number; amountCents: number }
-  | { ok: false; reason: "not_found" | "locked" | "stale" | "quota"; message: string };
+  | { ok: false; reason: "not_found" | "locked" | "stale" | "quota" | "add_disabled"; message: string };
+
+export const ADD_DISABLED =
+  "Penambahan peserta baru sementara tidak dapat dilakukan sendiri. Hubungi panitia untuk menambah peserta; Anda tetap dapat mengubah atau menghapus peserta yang ada.";
 
 const STALE = "Data pendaftaran sudah berubah sejak halaman ini dibuka. Halaman telah dimuat ulang; periksa lalu simpan kembali.";
 const LOCKED: Record<LockReason, string> = {
@@ -116,6 +119,9 @@ export async function updateOwnRegistration(
     return { ok: false, reason: "stale", message: STALE };
   }
   const removed = current.filter((p) => !keptIds.includes(p.id));
+  // Quota control: adding NEW participants is an admin switch (events.self_add_allowed, default off).
+  const added = input.participants.length - keptIds.length;
+  if (added > 0 && !event.self_add_allowed) return { ok: false, reason: "add_disabled", message: ADD_DISABLED };
   const people = input.participants.length;
   const amountCents = reg.is_member ? 0 : payingCount(input.participants) * event.price_non_member_cents;
   const seats = seatCount(input.participants);
@@ -153,7 +159,8 @@ export async function updateOwnRegistration(
          WHERE id = ? AND lower(email) = lower(?) AND edit_rev IS ? AND status = ? AND ${EDITABLE_SQL}
            ${opts.ignoreWindow ? "" : `AND ${WINDOW_SQL}`}
            AND (? <= seats
-             OR (${SEATS_USED_SQL}) - seats + ? <= (SELECT ${isMember ? "quota_member" : "quota_non_member"} FROM events WHERE id = ?))`,
+             OR (${SEATS_USED_SQL}) - seats + ? <= (SELECT ${isMember ? "quota_member" : "quota_non_member"} FROM events WHERE id = ?))
+           AND (? = 0 OR (SELECT self_add_allowed FROM events WHERE id = ?) = 1)`,
       )
       .bind(
         input.registrantName,
@@ -174,6 +181,8 @@ export async function updateOwnRegistration(
         isMember ? 1 : 0,
         nowIso,
         seats,
+        event.id,
+        added,
         event.id,
       ),
   ];
@@ -258,6 +267,10 @@ export async function updateOwnRegistration(
   const freshState = selfEditState(fresh, event, now, opts);
   if (!freshState.editable) return { ok: false, reason: "locked", message: LOCKED[freshState.reason] };
   if (fresh.edit_rev !== reg.edit_rev) return { ok: false, reason: "stale", message: STALE };
+  if (added > 0) {
+    const ev = await db.prepare("SELECT self_add_allowed FROM events WHERE id = ?").bind(event.id).first<{ self_add_allowed: number }>();
+    if (!ev?.self_add_allowed) return { ok: false, reason: "add_disabled", message: ADD_DISABLED };
+  }
   if (seats > fresh.seats) {
     const used = await seatsUsed(db, event.id, isMember, nowIso);
     const quota = isMember ? event.quota_member : event.quota_non_member;
@@ -269,4 +282,70 @@ export async function updateOwnRegistration(
     };
   }
   return { ok: false, reason: "stale", message: STALE };
+}
+
+export type CancelResult = { ok: true; message: string } | { ok: false; reason: "not_found" | "locked" | "stale"; message: string };
+
+const CANCEL_STALE = "Data pendaftaran sudah berubah sejak halaman ini dibuka. Halaman telah dimuat ulang; periksa lalu coba lagi.";
+
+/**
+ * Self-service cancellation: the registrant deletes their OWN registration (all participants, ticket codes, queued emails,
+ * their login sessions and codes), which frees every seat in the quota. Allowed for the same registrations that may be
+ * edited (online member, or non-member whose payment is still pending before the deadline), also after registration has
+ * closed, but not once the event has started, anyone checked in, or the payment was confirmed (paid / manual: via the committee).
+ *
+ * Everything is ONE db.batch. The audit row is written first and only when the registration is still the one the page showed
+ * (edit_rev) and still eligible; every DELETE is gated on that audit row, so it is all-or-nothing and can only touch rows
+ * of this one registration. The audit row holds no name or email (the registrant asked for their data to be deleted).
+ */
+export async function cancelOwnRegistration(
+  db: D1Database,
+  event: EventRow,
+  email: string,
+  rev: string,
+  opts: { now?: Date } = {},
+): Promise<CancelResult> {
+  const now = opts.now ?? new Date();
+  const nowIso = now.toISOString();
+  const reg = await getActiveRegistrationByEmail(db, event.id, email);
+  if (!reg) return { ok: false, reason: "not_found", message: "Tidak ada pendaftaran aktif untuk email ini." };
+  const state = selfEditState(reg, event, now, { ignoreWindow: true });
+  if (!state.editable) return { ok: false, reason: "locked", message: LOCKED[state.reason] };
+  if (nowIso >= event.starts_at) return { ok: false, reason: "locked", message: LOCKED.closed };
+  if ((reg.edit_rev ?? "") !== rev) return { ok: false, reason: "stale", message: CANCEL_STALE };
+
+  const actor = "self-service";
+  const logged = `EXISTS (SELECT 1 FROM audit_log WHERE at = ? AND actor = ? AND action = 'registration.self_cancel' AND target = ?)`;
+  const bindLogged = [nowIso, actor, reg.id];
+  const detail = JSON.stringify({ status: reg.status, people: reg.people, seats: reg.seats, member: reg.is_member === 1 });
+
+  const res = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO audit_log (at, actor, action, target, detail)
+         SELECT ?, ?, 'registration.self_cancel', ?, ?
+         WHERE EXISTS (SELECT 1 FROM registrations WHERE id = ? AND edit_rev IS ? AND status = ? AND ${EDITABLE_SQL})
+           AND EXISTS (SELECT 1 FROM events WHERE id = ? AND starts_at > ?)
+           AND NOT EXISTS (SELECT 1 FROM participants WHERE registration_id = ? AND checked_in_at IS NOT NULL)`,
+      )
+      .bind(nowIso, actor, reg.id, detail, reg.id, reg.edit_rev, reg.status, nowIso, event.id, nowIso, reg.id),
+    db.prepare(`DELETE FROM participants WHERE registration_id = ? AND ${logged}`).bind(reg.id, ...bindLogged),
+    db.prepare(`DELETE FROM email_log WHERE registration_id = ? AND ${logged}`).bind(reg.id, ...bindLogged),
+    db.prepare(`DELETE FROM dev_outbox WHERE registration_id = ? AND ${logged}`).bind(reg.id, ...bindLogged),
+    db
+      .prepare(`DELETE FROM registrant_sessions WHERE event_id = ? AND email = lower(?) AND ${logged}`)
+      .bind(event.id, email, ...bindLogged),
+    db
+      .prepare(`DELETE FROM registrant_login_codes WHERE event_id = ? AND email = lower(?) AND ${logged}`)
+      .bind(event.id, email, ...bindLogged),
+    db.prepare(`DELETE FROM registrations WHERE id = ? AND ${logged}`).bind(reg.id, ...bindLogged),
+  ]);
+  if ((res[0].meta.changes ?? 0) === 1) {
+    return { ok: true, message: "Pendaftaran Anda telah dibatalkan dan datanya dihapus. Kursi sudah dikembalikan ke kuota." };
+  }
+  const fresh = await getActiveRegistrationByEmail(db, event.id, email);
+  if (!fresh) return { ok: false, reason: "not_found", message: "Tidak ada pendaftaran aktif untuk email ini." };
+  const freshState = selfEditState(fresh, event, now, { ignoreWindow: true });
+  if (!freshState.editable) return { ok: false, reason: "locked", message: LOCKED[freshState.reason] };
+  return { ok: false, reason: "stale", message: CANCEL_STALE };
 }

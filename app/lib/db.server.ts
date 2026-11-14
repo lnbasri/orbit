@@ -24,6 +24,8 @@ export interface EventRow {
   location_name: string | null;
   location_address: string | null;
   location_map_url: string | null;
+  /** 1 = registrants may add NEW participants in "Pendaftaran Saya" (default 0, quota control). */
+  self_add_allowed: number;
   status: "draft" | "open" | "closed";
 }
 

@@ -24,7 +24,7 @@ import {
   requestRegistrantCode,
   verifyRegistrantCode,
 } from "~/lib/registrant-access.server";
-import { getActiveRegistrationByEmail, lockMessage, selfEditState, updateOwnRegistration } from "~/lib/self-service.server";
+import { cancelOwnRegistration, getActiveRegistrationByEmail, lockMessage, selfEditState, updateOwnRegistration } from "~/lib/self-service.server";
 import { verifyTurnstile } from "~/lib/turnstile.server";
 import { selfEditSchema, formToSelfEditDraft, toFieldErrors } from "~/lib/validation";
 
@@ -53,6 +53,7 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
     cooldownSeconds: Math.round(CODE_COOLDOWN_MS / 1000),
     contact: emailConfig(env).replyTo,
     loggedOut: url.searchParams.has("keluar"),
+    cancelled: url.searchParams.has("dibatalkan"),
   };
 
   const session = await identifyRegistrant(env.DB, request, event.id);
@@ -91,6 +92,9 @@ export async function loader({ request, params, url }: Route.LoaderArgs) {
     state: state.editable
       ? state
       : { editable: false as const, message: lockMessage(state.reason), paid: state.reason === "paid" },
+    canAdd: event.self_add_allowed === 1,
+    canCancel:
+      selfEditState(reg, event, new Date(), { ignoreWindow: true }).editable && new Date().toISOString() < event.starts_at,
     priceCents: event.price_non_member_cents,
     maxFamily: event.max_family,
     bank: reg.status === "pending_payment" && bankConfigured(env) ? bankInfo(env) : null,
@@ -112,6 +116,25 @@ export async function action({ request, params, url }: Route.ActionArgs) {
   if (intent === "logout") {
     await destroyRegistrantSession(env.DB, request);
     throw redirect(`${path}?keluar`, { headers: { "Set-Cookie": clearRegistrantCookie(request) } });
+  }
+
+  if (intent === "cancel") {
+    const session = await identifyRegistrant(env.DB, request, event.id);
+    if (!session) {
+      return data<ActionData>(
+        { step: "email", email: "", error: "Sesi Anda sudah berakhir. Masukkan email Anda untuk meminta kode baru." },
+        { status: 401 },
+      );
+    }
+    const res = await cancelOwnRegistration(env.DB, event, session.email, String(form.get("rev") ?? ""));
+    if (!res.ok) {
+      return data<ActionData>(
+        { step: "save", result: { ok: false, message: res.message, errors: {} } },
+        { status: res.reason === "stale" ? 409 : 400 },
+      );
+    }
+    // Their sessions are deleted with the registration; clear the cookie too.
+    throw redirect(`${path}?dibatalkan`, { headers: { "Set-Cookie": clearRegistrantCookie(request) } });
   }
 
   if (intent === "save") {
@@ -231,6 +254,8 @@ export default function MyRegistrationPage({ loaderData }: Route.ComponentProps)
           participants={d.participants}
           state={d.state}
           priceCents={d.priceCents}
+          canAdd={d.canAdd}
+          canCancel={d.canCancel}
           maxFamily={d.maxFamily}
           contact={d.contact}
           bank={d.bank}
@@ -273,7 +298,15 @@ export default function MyRegistrationPage({ loaderData }: Route.ComponentProps)
                 siteKey={d.siteKey}
                 defaultEmail={actionData?.step === "email" ? actionData.email : ""}
                 error={actionData?.step === "email" ? actionData.error : null}
-                notice={d.loggedOut && !actionData ? "Anda telah keluar dari halaman pendaftaran." : null}
+                notice={
+                  actionData
+                    ? null
+                    : d.cancelled
+                      ? "Pendaftaran Anda telah dibatalkan dan datanya dihapus. Kursi dikembalikan ke kuota."
+                      : d.loggedOut
+                        ? "Anda telah keluar dari halaman pendaftaran."
+                        : null
+                }
               />
             )}
             {d.devLog ? (

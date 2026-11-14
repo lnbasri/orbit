@@ -16,7 +16,9 @@ import {
   UserIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
-import { Form, useNavigation } from "react-router";
+import { Form, useNavigation, useSubmit } from "react-router";
+
+import { ConfirmDialog } from "~/components/ConfirmDialog";
 
 import { Callout, Eyebrow, Spinner, buttonClass } from "~/components/ui";
 import { AGE_GROUP_SHORT, GENDER_LABEL, formatDateTime, formatEuro, payingCount } from "~/lib/format";
@@ -72,6 +74,8 @@ export function ManageRegistration({
   state,
   priceCents,
   maxFamily,
+  canAdd,
+  canCancel,
   contact,
   bank,
   result,
@@ -81,6 +85,8 @@ export function ManageRegistration({
   state: MyEditState;
   priceCents: number;
   maxFamily: number;
+  canAdd: boolean;
+  canCancel: boolean;
   contact: string;
   bank: { accountName: string; iban: string } | null;
   result?: SaveResult;
@@ -144,12 +150,15 @@ export function ManageRegistration({
             until={state.until}
             priceCents={priceCents}
             maxFamily={maxFamily}
+            canAdd={canAdd}
             contact={contact}
             errors={result && !result.ok ? result.errors : {}}
           />
         ) : (
           <ReadOnly registration={r} participants={participants} state={state} contact={contact} />
         )}
+
+        {canCancel ? <CancelSection rev={r.editRev} count={participants.length} /> : null}
       </div>
     </>
   );
@@ -246,6 +255,7 @@ function EditForm({
   until,
   priceCents,
   maxFamily,
+  canAdd,
   contact,
   errors: serverErrors,
 }: {
@@ -254,6 +264,7 @@ function EditForm({
   until: string | null;
   priceCents: number;
   maxFamily: number;
+  canAdd: boolean;
   contact: string;
   errors: FieldErrors;
 }) {
@@ -338,10 +349,19 @@ function EditForm({
           <div>
             <h2 className="text-base font-semibold text-slate-900">Peserta ({rows.length} orang)</h2>
             <p className="mt-1 text-sm text-slate-500">Maksimal {maxFamily} orang termasuk Anda.</p>
+            {!canAdd ? (
+              <p className="mt-1 text-sm text-slate-500">
+                Menambah peserta baru sementara tidak dapat dilakukan sendiri; hubungi panitia (
+                <a className="font-medium text-brand underline" href={`mailto:${contact}`}>
+                  {contact}
+                </a>
+                ). Mengubah atau menghapus peserta tetap bisa.
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
-            disabled={rows.length >= maxFamily}
+            disabled={!canAdd || rows.length >= maxFamily}
             onClick={() => setRows((prev) => [...prev, { key: newKey(), name: "", gender: "", ageGroup: "" }])}
             className={buttonClass("secondary", "sm")}
           >
@@ -449,5 +469,43 @@ function EditForm({
         </button>
       </div>
     </Form>
+  );
+}
+
+function CancelSection({ rev, count }: { rev: string; count: number }) {
+  const [open, setOpen] = useState(false);
+  const submit = useSubmit();
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && navigation.formData?.get("intent") === "cancel";
+  return (
+    <section className="mt-10 border-t border-slate-200/80 pt-6">
+      <h2 className="text-base font-semibold text-slate-900">Batalkan pendaftaran</h2>
+      <p className="mt-1 text-sm text-slate-600">
+        Tidak jadi hadir? Pendaftaran beserta seluruh peserta ({count} orang) dihapus dari acara dan kursinya kembali ke kuota.
+        Tindakan ini tidak dapat dibatalkan; untuk hadir lagi Anda harus mendaftar ulang selama masih ada kuota.
+      </p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setOpen(true)}
+        className={buttonClass("secondary", "md", "mt-4 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700")}
+      >
+        {busy ? <Spinner /> : <TrashIcon className="size-4" aria-hidden="true" />}
+        {busy ? "Menghapus…" : "Batalkan dan hapus pendaftaran"}
+      </button>
+      <ConfirmDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        onConfirm={() => {
+          setOpen(false);
+          submit({ intent: "cancel", rev }, { method: "post" });
+        }}
+        tone="danger"
+        icon={TrashIcon}
+        title="Batalkan dan hapus pendaftaran?"
+        description={`Seluruh ${count} peserta dihapus dari acara, QR Code tidak berlaku lagi, dan data pendaftaran Anda dihapus permanen. Hanya pendaftaran Anda yang terhapus. Tindakan ini tidak dapat dibatalkan.`}
+        confirmLabel="Ya, hapus pendaftaran"
+      />
+    </section>
   );
 }
