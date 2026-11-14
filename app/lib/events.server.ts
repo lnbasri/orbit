@@ -271,3 +271,28 @@ export async function updateQuotas(
   ).run();
   return { ok: true, message: "Kuota disimpan." };
 }
+
+/**
+ * Admin: allow or forbid registrants to ADD new participants in "Pendaftaran Saya" (quota control, default off).
+ * Editing and removing existing participants and cancelling stay possible either way. Audited.
+ */
+export async function updateSelfAdd(
+  db: D1Database,
+  actor: string,
+  eventId: number,
+  allowed: boolean,
+  now = new Date(),
+): Promise<EventResult> {
+  const event = await getEventById(db, eventId);
+  if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+  const value = allowed ? 1 : 0;
+  const text = allowed
+    ? "Peserta sekarang boleh menambah peserta baru sendiri."
+    : "Peserta tidak dapat lagi menambah peserta baru sendiri.";
+  if (event.self_add_allowed === value) return { ok: true, message: text };
+  await db.batch([
+    db.prepare("UPDATE events SET self_add_allowed = ? WHERE id = ?").bind(value, eventId),
+    auditStatement(db, actor, "event.self_add", event.slug, { from: event.self_add_allowed, to: value }, now.toISOString()),
+  ]);
+  return { ok: true, message: text };
+}

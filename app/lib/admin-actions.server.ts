@@ -1,5 +1,5 @@
 import { addAdmin, removeAdmin } from "./admins.server";
-import { updateEventDetails, updateEventLocation, updateEventTimes, updateEventPrice, updateQuotas, updateRegistrationWindow } from "./events.server";
+import { updateEventDetails, updateEventLocation, updateEventTimes, updateEventPrice, updateSelfAdd, updateQuotas, updateRegistrationWindow } from "./events.server";
 import { emailConfig, type AppEnv } from "./config.server";
 import { audit, getEventBySlug } from "./db.server";
 import { deliverEmail, type EmailKind } from "./email/send.server";
@@ -99,6 +99,11 @@ export async function handleAdminIntent(env: AppEnv, actor: string, form: FormDa
       const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");
       if (!event) return { ok: false, message: "Acara tidak ditemukan." };
       return updateEventPrice(env.DB, actor, event.id, String(form.get("price") ?? ""));
+    }
+    case "save-self-add": {
+      const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");
+      if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+      return updateSelfAdd(env.DB, actor, event.id, form.get("allowed") === "1");
     }
     case "save-quotas": {
       const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");

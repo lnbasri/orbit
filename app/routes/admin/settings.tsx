@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Switch } from "@headlessui/react";
 import { useFetcher } from "react-router";
 import {
   CalendarDaysIcon,
@@ -12,6 +13,7 @@ import {
   LockOpenIcon,
   MapPinIcon,
   MicrophoneIcon,
+  UserPlusIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
 
@@ -52,6 +54,7 @@ export async function loader() {
     closesAtUtc: event.registration_closes_at,
     price: (event.price_non_member_cents / 100).toFixed(2).replace(/\.00$/, "").replace(".", ","),
     priceCents: event.price_non_member_cents,
+    selfAdd: event.self_add_allowed === 1,
     state: registrationWindowError(event, new Date()), // null = open right now
   };
 }
@@ -61,7 +64,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { title, speaker, theme, locationName, locationAddress, locationMapUrl, startsAt, startsAtLocal, endsAtLocal, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota } = loaderData;
+  const { title, speaker, theme, locationName, locationAddress, locationMapUrl, startsAt, startsAtLocal, endsAtLocal, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota, selfAdd } = loaderData;
   const fetcher = useFetcher<{ ok: boolean; message: string }>();
   const timesFetcher = useFetcher<{ ok: boolean; message: string }>();
   const timesBusy = timesFetcher.state !== "idle";
@@ -205,6 +208,10 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
         <QuotaForm quota={quota} />
       </Panel>
 
+      <Panel title="Tambah peserta lewat Pendaftaran Saya" icon={UserPlusIcon} className="mt-6">
+        <SelfAddToggle allowed={selfAdd} />
+      </Panel>
+
       <Panel title="Biaya pendaftaran" icon={BanknotesIcon} className="mt-6">
         <Callout tone="warning" icon={ExclamationTriangleIcon} className="mb-6">
           <p>
@@ -249,6 +256,45 @@ function Hint({ icon: Icon, children }: { icon: typeof ClockIcon; children: Reac
       <Icon className="size-4 shrink-0 text-slate-400" aria-hidden="true" />
       <span>{children}</span>
     </li>
+  );
+}
+
+function SelfAddToggle({ allowed }: { allowed: boolean }) {
+  const fetcher = useFetcher<{ ok: boolean; message: string }>();
+  // Show the requested value right away while saving.
+  const pending = fetcher.formData ? fetcher.formData.get("allowed") === "1" : null;
+  const on = pending ?? allowed;
+  return (
+    <>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-900">
+            {on ? "Peserta boleh menambah peserta baru sendiri" : "Peserta tidak boleh menambah peserta baru sendiri"}
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            Hanya menyangkut menambah orang baru di "Pendaftaran Saya". Mengubah data, menghapus peserta, dan membatalkan
+            pendaftaran tetap bisa dilakukan sendiri.
+          </p>
+        </div>
+        <Switch
+          checked={on}
+          disabled={fetcher.state !== "idle"}
+          onChange={(v) => fetcher.submit({ intent: "save-self-add", allowed: v ? "1" : "0" }, { method: "post" })}
+          aria-label="Izinkan peserta menambah peserta baru sendiri"
+          className="group relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border border-slate-300 bg-slate-200 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-60 data-checked:border-brand data-checked:bg-brand"
+        >
+          <span className="pointer-events-none inline-block size-5 translate-x-0.5 translate-y-px rounded-full bg-white shadow transition-transform group-data-checked:translate-x-5" />
+        </Switch>
+      </div>
+      <Notice result={fetcher.data} className="mt-4" />
+      <ul className="mt-6 space-y-2 border-t border-slate-100 pt-5 text-xs text-slate-500">
+        <Hint icon={UsersIcon}>
+          Standarnya mati, supaya kuota tidak bertambah tanpa sepengetahuan panitia. Peserta yang butuh tambahan orang
+          menghubungi panitia. Saat menyala, penambahan tetap dicek terhadap sisa kuota.
+        </Hint>
+        <Hint icon={InformationCircleIcon}>Setiap perubahan dicatat di audit log dan berlaku seketika.</Hint>
+      </ul>
+    </>
   );
 }
 
