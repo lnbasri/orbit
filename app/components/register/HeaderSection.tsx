@@ -5,6 +5,7 @@ import {
   CheckCircleIcon,
   ClockIcon,
   EnvelopeIcon,
+  MapPinIcon,
   IdentificationIcon,
   LockClosedIcon,
   MicrophoneIcon,
@@ -26,6 +27,9 @@ export interface PublicEvent {
   speaker: string | null;
   theme: string | null;
   infoUrl: string | null;
+  locationName?: string | null;
+  locationAddress?: string | null;
+  locationMapUrl?: string | null;
   startsAt: string;
   /** Hijri date of the event day, computed on the server (e.g. "25 Jumadil Akhir 1448"). */
   startsAtHijri?: string;
@@ -121,6 +125,32 @@ export function HeaderSection({ event }: { event: PublicEvent }) {
             sub={`Non-anggota ${formatEuro(event.priceCents)} per orang (remaja & dewasa)`}
           />
         )}
+        {event.locationName || event.locationAddress ? (
+          <EventDetailRow
+            icon={MapPinIcon}
+            label="Lokasi"
+            className="sm:col-span-2 lg:col-span-4 lg:pl-10"
+            value={event.locationName ?? event.locationAddress}
+            sub={
+              <>
+                {event.locationName ? event.locationAddress : null}
+                {event.locationMapUrl ? (
+                  <>
+                    {event.locationName && event.locationAddress ? " · " : null}
+                    <a
+                      href={event.locationMapUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-brand hover:text-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                    >
+                      Buka di Google Maps
+                    </a>
+                  </>
+                ) : null}
+              </>
+            }
+          />
+        ) : null}
       </dl>
 
       <section aria-labelledby="ketentuan" className="px-5 py-8 sm:px-8 lg:px-10">

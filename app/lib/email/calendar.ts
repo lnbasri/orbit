@@ -11,7 +11,14 @@ export interface CalendarEvent {
   starts_at: string;
   ends_at: string;
   info_url?: string | null;
+  location_name?: string | null;
+  location_address?: string | null;
+  location_map_url?: string | null;
 }
+
+/** "Masjid Al Hikmah, Medlerstraat 4, 2531 HA Den Haag" (empty when no location is set). */
+export const locationText = (e: Pick<CalendarEvent, "location_name" | "location_address">) =>
+  [e.location_name, e.location_address].filter(Boolean).join(", ");
 
 /** 2026-12-05T08:00:00.000Z -> 20261205T080000Z */
 const icsStamp = (iso: string) => new Date(iso).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
@@ -22,6 +29,8 @@ const summary = (e: CalendarEvent) => `${e.title}${e.speaker ? ` bersama ${e.spe
 export function calendarDescription(e: CalendarEvent): string {
   return [
     e.theme ? `Tema: ${e.theme}` : null,
+    locationText(e) ? `Lokasi: ${locationText(e)}` : null,
+    e.location_map_url ? `Peta: ${e.location_map_url}` : null,
     "Penyelenggara: Panitia Kajian PPME Den Haag",
     "Tunjukkan QR Code dari email konfirmasi kepada panitia saat check-in.",
     e.info_url ? `Info acara: ${e.info_url}` : null,
@@ -69,6 +78,7 @@ export function buildIcs(e: CalendarEvent, now: Date = new Date()): string {
     `DTSTART:${icsStamp(e.starts_at)}`,
     `DTEND:${icsStamp(e.ends_at)}`,
     `SUMMARY:${icsEscape(summary(e))}`,
+    ...(locationText(e) ? [`LOCATION:${icsEscape(locationText(e))}`] : []),
     `DESCRIPTION:${icsEscape(calendarDescription(e))}`,
     ...(e.info_url ? [`URL:${e.info_url}`] : []),
     "STATUS:CONFIRMED",
@@ -99,6 +109,7 @@ export function calendarLinks(e: CalendarEvent): { google: string; outlook: stri
   google.searchParams.set("text", summary(e));
   google.searchParams.set("dates", `${icsStamp(e.starts_at)}/${icsStamp(e.ends_at)}`);
   google.searchParams.set("details", calendarDescription(e));
+  if (locationText(e)) google.searchParams.set("location", locationText(e));
 
   const outlook = new URL("https://outlook.live.com/calendar/0/deeplink/compose");
   outlook.searchParams.set("path", "/calendar/action/compose");
@@ -107,5 +118,6 @@ export function calendarLinks(e: CalendarEvent): { google: string; outlook: stri
   outlook.searchParams.set("startdt", new Date(e.starts_at).toISOString());
   outlook.searchParams.set("enddt", new Date(e.ends_at).toISOString());
   outlook.searchParams.set("body", calendarDescription(e));
+  if (locationText(e)) outlook.searchParams.set("location", locationText(e));
   return { google: google.toString(), outlook: outlook.toString() };
 }

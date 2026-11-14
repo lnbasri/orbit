@@ -174,6 +174,62 @@ export async function updateEventDetails(
 }
 
 /**
+ * Admin: the event location (name, address, Google Maps link). Shown on the form, in the emails and in the calendar
+ * entry from now on; emails already sent are not touched. All three may be empty (= no location shown).
+ */
+export async function updateEventLocation(
+  db: D1Database,
+  actor: string,
+  eventId: number,
+  nameInput: string,
+  addressInput: string,
+  mapUrlInput: string,
+  now = new Date(),
+): Promise<EventResult> {
+  const event = await getEventById(db, eventId);
+  if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+  const clean = (v: string) => v.trim().replace(/\s+/g, " ");
+  const name = clean(nameInput);
+  const address = clean(addressInput);
+  const mapUrl = mapUrlInput.trim();
+  if (name.length > 120) return { ok: false, message: "Nama lokasi terlalu panjang (maksimal 120 karakter)." };
+  if (address.length > 200) return { ok: false, message: "Alamat terlalu panjang (maksimal 200 karakter)." };
+  if (mapUrl) {
+    let ok = mapUrl.length <= 300;
+    try {
+      ok = ok && new URL(mapUrl).protocol === "https:";
+    } catch {
+      ok = false;
+    }
+    if (!ok) return { ok: false, message: "Tautan peta harus berupa alamat https:// yang valid (maksimal 300 karakter)." };
+  }
+  if (
+    (name || null) === event.location_name &&
+    (address || null) === event.location_address &&
+    (mapUrl || null) === event.location_map_url
+  ) {
+    return { ok: true, message: "Lokasi tidak berubah." };
+  }
+  await db.batch([
+    db
+      .prepare("UPDATE events SET location_name = ?, location_address = ?, location_map_url = ? WHERE id = ?")
+      .bind(name || null, address || null, mapUrl || null, eventId),
+    auditStatement(
+      db,
+      actor,
+      "event.location",
+      event.slug,
+      {
+        from: { name: event.location_name, address: event.location_address, mapUrl: event.location_map_url },
+        to: { name: name || null, address: address || null, mapUrl: mapUrl || null },
+      },
+      now.toISOString(),
+    ),
+  ]);
+  return { ok: true, message: "Lokasi disimpan." };
+}
+
+/**
  * Admin: set the seat capacity per group. A group's capacity can never go below the seats it currently
  * holds; the check is inside the UPDATE (same seat rule as registration) so a concurrent registration can't slip under it.
  */
