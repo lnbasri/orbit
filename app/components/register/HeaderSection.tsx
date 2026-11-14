@@ -55,10 +55,10 @@ export function HeaderSection({ event }: { event: PublicEvent }) {
         </div>
 
         <div className="mt-6 max-w-3xl space-y-2 text-[15px] leading-relaxed text-slate-600 sm:text-base">
-          <p lang="ar" dir="rtl" className="pt-1 text-right text-2xl leading-loose font-medium text-slate-900 sm:text-[1.75rem]">
+          <p lang="ar" dir="rtl" className="font-arabic pt-1 text-right text-2xl leading-loose text-slate-900 sm:text-[1.75rem]">
             بِسْمِ ٱللَّٰهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ
           </p>
-          <p lang="ar" dir="rtl" className="pb-1 text-right text-xl leading-loose font-medium text-slate-900 sm:text-2xl">
+          <p lang="ar" dir="rtl" className="font-arabic pb-1 text-right text-xl leading-loose text-slate-900 sm:text-2xl">
             اَلسَلامُ عَلَيْكُم وَرَحْمَةُ اَللهِ وَبَرَكاتُهُ
           </p>
           <p>

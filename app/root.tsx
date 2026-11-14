@@ -3,6 +3,8 @@ import { ArrowLeftIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outl
 
 import type { Route } from "./+types/root";
 import "@fontsource-variable/inter/wght.css";
+// Arabic greeting (Bismillah, salam): one bundled font so every device renders it the same. Arabic subset only.
+import "@fontsource/noto-naskh-arabic/arabic-400.css";
 import "./app.css";
 import { Backdrop, Eyebrow, Logo } from "~/components/ui";
 
