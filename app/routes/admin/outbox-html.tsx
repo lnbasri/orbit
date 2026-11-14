@@ -15,6 +15,7 @@ export async function loader({ params }: Route.LoaderArgs) {
   const attachments = JSON.parse(row.attachments_json) as Attachment[];
   let html = row.html;
   for (const a of attachments) {
+    if (!a.contentId) continue;
     html = html.replaceAll(`cid:${a.contentId}`, `data:${a.contentType};base64,${a.contentBase64}`);
   }
   return new Response(`<!doctype html><meta charset="utf-8"><body style="margin:16px">${html}</body>`, {

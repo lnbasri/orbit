@@ -57,6 +57,7 @@ const EMAIL_LABEL: Record<string, string> = {
   payment_instructions: "Instruksi pembayaran",
   reminder: "Pengingat",
   expired: "Kedaluwarsa",
+  membership_pending: "Menunggu validasi anggota",
 };
 
 export default function RegistrationDetail({ loaderData }: Route.ComponentProps) {
@@ -132,6 +133,52 @@ export default function RegistrationDetail({ loaderData }: Route.ComponentProps)
                         icon: CheckBadgeIcon,
                       }}
                     />
+                  </div>
+                ) : reg.status === "pending_membership" ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="flex items-center gap-2 text-amber-700">
+                      <ExclamationTriangleIcon className="size-5 shrink-0" aria-hidden="true" />
+                      Menunggu validasi keanggotaan. QR Code belum dikirim.
+                    </span>
+                    <span className="flex flex-wrap gap-2">
+                      <ActionButton
+                        intent="verify-membership"
+                        registrationId={reg.id}
+                        label="Validasi anggota"
+                        icon={CheckBadgeIcon}
+                        confirm={{
+                          title: "Validasi keanggotaan",
+                          description: (
+                            <>
+                              Apakah <strong>{reg.registrant_name}</strong> sudah dicek dan benar terdaftar di daftar anggota
+                              PPME Den Haag? Pendaftaran akan diterima dan QR Code langsung dikirim ke pendaftar.
+                            </>
+                          ),
+                          confirmLabel: "Ya, anggota valid",
+                          tone: "info",
+                          icon: CheckBadgeIcon,
+                        }}
+                      />
+                      <ActionButton
+                        intent="reject-membership"
+                        registrationId={reg.id}
+                        label="Tolak (bukan anggota)"
+                        tone="danger"
+                        icon={XCircleIcon}
+                        confirm={{
+                          title: "Tolak pendaftaran",
+                          description: (
+                            <>
+                              Keanggotaan <strong>{reg.registrant_name}</strong> tidak dapat divalidasi? Pendaftaran akan
+                              ditolak dan kursi dibebaskan. Tidak ada email otomatis yang dikirim.
+                            </>
+                          ),
+                          confirmLabel: "Ya, tolak",
+                          tone: "danger",
+                          icon: XCircleIcon,
+                        }}
+                      />
+                    </span>
                   </div>
                 ) : reg.membership_verified_at ? (
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -295,9 +342,18 @@ export default function RegistrationDetail({ loaderData }: Route.ComponentProps)
                 );
               })}
             </ul>
-            {(reg.status === "accepted" || reg.status === "pending_payment") && reg.email ? (
+            {(reg.status === "accepted" || reg.status === "pending_payment" || reg.status === "pending_membership") && reg.email ? (
               <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-                {reg.status === "accepted" ? (
+                {reg.status === "pending_membership" ? (
+                  <ActionButton
+                    intent="resend-email"
+                    registrationId={reg.id}
+                    extra={{ kind: "membership_pending" }}
+                    label="Kirim ulang pemberitahuan"
+                    tone="neutral"
+                    icon={PaperAirplaneIcon}
+                  />
+                ) : reg.status === "accepted" ? (
                   <ActionButton
                     intent="resend-email"
                     registrationId={reg.id}

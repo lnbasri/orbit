@@ -27,6 +27,8 @@ export interface PublicEvent {
   theme: string | null;
   infoUrl: string | null;
   startsAt: string;
+  /** Hijri date of the event day, computed on the server (e.g. "25 Jumadil Akhir 1448 H"). */
+  startsAtHijri?: string;
   endsAt: string;
   registrationClosesAt: string | null;
   maxFamily: number;
@@ -54,8 +56,11 @@ export function HeaderSection({ event }: { event: PublicEvent }) {
 
         <div className="mt-6 max-w-3xl space-y-2 text-[15px] leading-relaxed text-slate-600 sm:text-base">
           <p className="font-semibold text-slate-900">Assalamu'alaikum warahmatullahi wabarakatuh.</p>
+          <p lang="ar" dir="rtl" className="py-1 text-center text-2xl leading-loose font-medium text-slate-900 sm:text-[1.75rem]">
+            بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
+          </p>
           <p>
-            Panitia Kajian PPME Den Haag membuka pendaftaran peserta kajian
+            Bismillah, Panitia Kajian PPME Den Haag membuka pendaftaran peserta kajian
             {event.speaker ? (
               <>
                 {" "}
@@ -82,7 +87,12 @@ export function HeaderSection({ event }: { event: PublicEvent }) {
       </div>
 
       <dl className="mt-8 grid gap-px border-y border-slate-200/80 bg-slate-200/80 sm:grid-cols-2 lg:grid-cols-4">
-        <EventDetailRow icon={CalendarDaysIcon} label="Tanggal" value={formatLongDate(event.startsAt)} />
+        <EventDetailRow
+          icon={CalendarDaysIcon}
+          label="Tanggal"
+          value={formatLongDate(event.startsAt)}
+          sub={event.startsAtHijri || undefined}
+        />
         <EventDetailRow
           icon={ClockIcon}
           label="Waktu"

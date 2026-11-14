@@ -59,9 +59,32 @@ export function daysUntil(targetIso: string, now: Date, tz = EVENT_TZ): number {
   return Math.round((day(localDateKey(targetIso, tz)) - day(localDateKey(now, tz))) / 86_400_000);
 }
 
+/**
+ * Hijri (Umm al-Qura) date of an instant in the event time zone, e.g. "25 Jumadil Akhir 1448 H".
+ * Computed by ICU, so call it on the server and pass the string down (keeps SSR hydration deterministic).
+ */
+const HIJRI_MONTHS = [
+  "Muharram", "Safar", "Rabiul Awal", "Rabiul Akhir", "Jumadil Awal", "Jumadil Akhir",
+  "Rajab", "Syaban", "Ramadhan", "Syawal", "Dzulqa'dah", "Dzulhijjah",
+];
+export function formatHijriDate(iso: string, tz = EVENT_TZ): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-u-ca-islamic-umalqura-nu-latn", {
+    timeZone: tz,
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+  }).formatToParts(d);
+  const n = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const month = HIJRI_MONTHS[n("month") - 1];
+  return month ? `${n("day")} ${month} ${n("year")} H` : "";
+}
+
 export const REGISTRATION_STATUS_LABEL: Record<string, string> = {
   accepted: "Diterima",
   pending_payment: "Menunggu Pembayaran",
+  pending_membership: "Menunggu Validasi Anggota",
   expired: "Kedaluwarsa",
   rejected_quota: "Ditolak – kuota tidak mencukupi",
   rejected_membership: "Ditolak – keanggotaan tidak valid",
@@ -147,11 +170,19 @@ export const isPayingAgeGroup = (g: string) => PAYING_AGE_GROUPS.includes(g);
 /** Number of participants who pay (remaja + dewasa). */
 export const payingCount = (participants: { ageGroup: string }[]) => participants.filter((p) => isPayingAgeGroup(p.ageGroup)).length;
 
+/**
+ * Only remaja and dewasa take a quota seat; balita and anak do not (decision 14 Nov 2026). Same groups as the paying
+ * ones today, but a separate name because the two rules can change independently.
+ */
+export const QUOTA_AGE_GROUPS: readonly string[] = ["remaja", "dewasa"];
+export const seatCount = (participants: { ageGroup: string }[]) => participants.filter((p) => QUOTA_AGE_GROUPS.includes(p.ageGroup)).length;
+
 // --- CSV export: Indonesian headers and values (lowercase, as the committee reads them in Excel) ---
 
 const CSV_REGISTRATION_STATUS: Record<string, string> = {
   accepted: "diterima",
   pending_payment: "menunggu pembayaran",
+  pending_membership: "menunggu validasi anggota",
   expired: "kedaluwarsa",
   rejected_quota: "ditolak (kuota penuh)",
   rejected_membership: "ditolak (keanggotaan tidak valid)",
@@ -159,6 +190,7 @@ const CSV_REGISTRATION_STATUS: Record<string, string> = {
 const CSV_PARTICIPANT_STATUS: Record<string, string> = {
   accepted: "diterima",
   pending_payment: "menunggu pembayaran",
+  pending_membership: "menunggu validasi anggota",
   expired: "kedaluwarsa",
   rejected: "ditolak",
 };

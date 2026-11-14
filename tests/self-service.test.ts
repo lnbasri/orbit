@@ -3,14 +3,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getParticipants, getRegistration, type EventRow } from "../app/lib/db.server";
 import { deliverEmail } from "../app/lib/email/send.server";
 import { TICKET_TOKEN_PATTERN } from "../app/lib/ids";
-import { confirmPayment } from "../app/lib/payments.server";
+import { confirmPayment, setMembershipVerified } from "../app/lib/payments.server";
 import {
   createRegistrantSession,
   identifyRegistrant,
   requestRegistrantCode,
   verifyRegistrantCode,
 } from "../app/lib/registrant-access.server";
-import { registerOnline } from "../app/lib/registration.server";
+import { quotaSummary, registerOnline } from "../app/lib/registration.server";
 import { selfEditState, updateOwnRegistration } from "../app/lib/self-service.server";
 import { selfEditSchema, type SelfEditInput } from "../app/lib/validation";
 import { T0, emailCfg, hours, input, resetDb, startDb } from "./helpers";
@@ -35,10 +35,15 @@ beforeEach(async () => {
 const cfg = { ...emailCfg, publicUrl: "https://public.example" };
 const meta = { ip: "203.0.113.9", userAgent: "Mozilla/5.0 (iPhone) Safari/605.1", country: "NL", appOrigin: "https://public.example" };
 
-async function register(overrides: Parameters<typeof input>[0] = {}) {
+/** Registers; a member is validated by an admin right away (accepted, with QR codes) unless `validate: false`. */
+async function register(overrides: Parameters<typeof input>[0] = {}, validate = true) {
   const data = input(overrides);
   const res = await registerOnline(db, event, data, { now: T0, ignoreWindow: true });
-  if (res.kind !== "accepted" && res.kind !== "pending_payment") throw new Error(res.kind);
+  if (res.kind !== "pending_membership" && res.kind !== "pending_payment") throw new Error(res.kind);
+  if (res.kind === "pending_membership" && validate) {
+    // validated a minute before the tests' edits, so an edit afterwards is a real "update"
+    expect((await setMembershipVerified(db, res.registrationId, "admin@test", true, new Date(T0.getTime() - 60_000))).ok).toBe(true);
+  }
   return { id: res.registrationId, email: data.email };
 }
 
@@ -142,7 +147,8 @@ describe("member self-service edit", () => {
     expect(mail.html).toContain("Ketentuan Pendaftaran");
     expect(mail.html).toContain("Pendaftaran ditutup otomatis apabila kuota peserta sudah terpenuhi.");
     expect(mail.html).toContain("periksa juga folder spam");
-    expect(JSON.parse(mail.attachments_json)).toHaveLength(2);
+    // 2 QR images + the calendar file
+    expect((JSON.parse(mail.attachments_json) as { contentId?: string }[]).filter((a) => a.contentId)).toHaveLength(2);
 
     const audit = await db.prepare("SELECT * FROM audit_log WHERE action = 'registration.self_edit'").first<{ actor: string }>();
     expect(audit?.actor).toBe(email);
@@ -212,6 +218,72 @@ describe("member self-service edit", () => {
     expect(selfEditState(reg, event, late)).toEqual({ editable: false, reason: "closed" });
     const edit = { ...(await currentInput(id)), registrantName: "Telat" };
     expect(await updateOwnRegistration(db, event, email, "", edit, { now: late })).toMatchObject({ ok: false, reason: "locked" });
+  });
+});
+
+describe("member waiting for validation: self-service edit", () => {
+  it("may edit before validation: no ticket for the new participant, the notice is re-queued, validation then issues all tickets", async () => {
+    const { id, email } = await register({ people: 1 }, false);
+    const edit = await currentInput(id);
+    edit.participants.push({ name: "Anak Baru", gender: "perempuan", ageGroup: "anak" });
+    const res = await updateOwnRegistration(db, event, email, "", edit, { now: T0 });
+    expect(res).toMatchObject({ ok: true, changed: true, email: "membership_pending", people: 2 });
+    expect(await emailRow(id, "membership_pending")).toMatchObject({ status: "pending", attempts: 0 });
+    expect(await emailRow(id, "confirmation")).toBeNull();
+    const waiting = await getParticipants(db, id);
+    expect(waiting.every((p) => p.status === "pending_membership" && p.qr_token === null)).toBe(true);
+
+    expect((await setMembershipVerified(db, id, "admin@test", true, hours(1))).ok).toBe(true);
+    const accepted = await getParticipants(db, id);
+    expect(accepted).toHaveLength(2);
+    expect(accepted.every((p) => p.status === "accepted" && TICKET_TOKEN_PATTERN.test(p.qr_token ?? ""))).toBe(true);
+  });
+
+  it("a validation after the participants were read is a no-op when an edit came in between", async () => {
+    const { id, email } = await register({ people: 1 }, false);
+    const edit = { ...(await currentInput(id)), registrantName: "Sudah Diubah" };
+    expect((await updateOwnRegistration(db, event, email, "", edit, { now: T0 })).ok).toBe(true);
+    // the admin acts on a participants list that predates the edit (edit_rev moved on): validation still works on the
+    // fresh data, and nobody is left without a ticket
+    expect((await setMembershipVerified(db, id, "admin@test", true, hours(1))).ok).toBe(true);
+    expect((await getParticipants(db, id)).every((p) => p.qr_token)).toBe(true);
+  });
+});
+
+describe("quota counts remaja and dewasa only", () => {
+  it("balita and anak never take a seat, in registration or in an edit", async () => {
+    event = await resetDb(db, { member: 2 });
+    await db.prepare("UPDATE events SET registration_closes_at = ?").bind("2026-11-27T22:59:00.000Z").run();
+    const data = input({ people: 5 });
+    data.participants.forEach((p, i) => (p.ageGroup = (["dewasa", "remaja", "anak", "balita", "anak"] as const)[i]));
+    const res = await registerOnline(db, event, data, { now: T0, ignoreWindow: true });
+    expect(res.kind).toBe("pending_membership"); // 5 people, but only 2 seats
+    if (res.kind !== "pending_membership") return;
+    expect((await getRegistration(db, res.registrationId))!.seats).toBe(2);
+    expect((await quotaSummary(db, event, T0)).member).toMatchObject({ used: 2, remaining: 0 });
+
+    // quota is full for adults, yet children can still be added; one more adult cannot
+    const edit = await currentInput(res.registrationId);
+    edit.participants.push({ name: "Balita Lagi", gender: "laki-laki", ageGroup: "balita" });
+    expect((await updateOwnRegistration(db, event, data.email, "", edit, { now: T0 })).ok).toBe(true);
+    const edit2 = await currentInput(res.registrationId);
+    edit2.participants.push({ name: "Dewasa Lagi", gender: "laki-laki", ageGroup: "dewasa" });
+    expect(await updateOwnRegistration(db, event, data.email, await rev(res.registrationId), edit2, { now: T0 })).toMatchObject({
+      ok: false,
+      reason: "quota",
+    });
+    expect((await getRegistration(db, res.registrationId))!.seats).toBe(2);
+  });
+
+  it("changing an adult into a child frees the seat", async () => {
+    event = await resetDb(db, { member: 2 });
+    await db.prepare("UPDATE events SET registration_closes_at = ?").bind("2026-11-27T22:59:00.000Z").run();
+    const { id, email } = await register({ people: 2 }); // dewasa + remaja = 2 seats
+    expect((await quotaSummary(db, event, T0)).member.used).toBe(2);
+    const edit = await currentInput(id);
+    edit.participants[1].ageGroup = "anak";
+    expect((await updateOwnRegistration(db, event, email, "", edit, { now: T0 })).ok).toBe(true);
+    expect((await quotaSummary(db, event, T0)).member.used).toBe(1);
   });
 });
 

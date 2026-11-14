@@ -9,6 +9,7 @@ import { PAYMENT_STATUS_LABEL, REGISTRATION_STATUS_LABEL } from "~/lib/format";
 const STATUS_STYLE: Record<string, { badge: string; dot: string }> = {
   accepted: { badge: "bg-emerald-50 text-emerald-700 ring-emerald-600/20", dot: "bg-emerald-500" },
   pending_payment: { badge: "bg-amber-50 text-amber-800 ring-amber-600/25", dot: "bg-amber-500" },
+  pending_membership: { badge: "bg-sky-50 text-sky-800 ring-sky-600/25", dot: "bg-sky-500" },
   expired: { badge: "bg-slate-50 text-slate-600 ring-slate-500/20", dot: "bg-slate-400" },
   rejected_quota: { badge: "bg-red-50 text-red-700 ring-red-600/20", dot: "bg-red-500" },
   rejected_membership: { badge: "bg-rose-50 text-rose-700 ring-rose-600/20", dot: "bg-rose-500" },

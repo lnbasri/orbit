@@ -128,9 +128,9 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
         />
         <Stat
           icon={ClockIcon}
-          label="Menunggu pembayaran"
-          value={s("pending_payment").families}
-          sub={`${s("pending_payment").people} peserta`}
+          label="Menunggu pembayaran / validasi"
+          value={`${s("pending_payment").families} / ${s("pending_membership").families}`}
+          sub={`${s("pending_payment").people} / ${s("pending_membership").people} peserta`}
         />
         <Stat
           icon={XCircleIcon}
@@ -158,8 +158,8 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
             nonMember={stats.quota.nonMember}
           />
           <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
-            Kursi terisi = diterima + menunggu pembayaran (belum lewat batas).
-            Pendaftaran manual tidak dihitung.
+            Kursi terisi = diterima + menunggu validasi anggota + menunggu pembayaran (belum lewat batas), hanya
+            peserta remaja dan dewasa. Balita dan anak serta pendaftaran manual tidak dihitung.
           </p>
         </Panel>
       </div>
@@ -246,11 +246,11 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
               pembayaran menunggu konfirmasi
             </ReviewRow>
             <ReviewRow
-              to="/admin/registrations?member=1&status=accepted"
+              to="/admin/registrations?member=1"
               icon={IdentificationIcon}
               count={stats.unverifiedMembers}
             >
-              anggota belum diverifikasi
+              anggota menunggu validasi
             </ReviewRow>
             {stats.unsentEmails > 0 ? (
               <ReviewRow

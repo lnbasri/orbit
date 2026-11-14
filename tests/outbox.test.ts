@@ -3,8 +3,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { dashboardStats, listRegistrations } from "../app/lib/admin.server";
 import { getParticipants, type EventRow } from "../app/lib/db.server";
 import { MAX_EMAIL_ATTEMPTS, deliverEmail } from "../app/lib/email/send.server";
-import { expireDue, runDeadlineJob } from "../app/lib/jobs.server";
+import { QR_BUDGET_PER_RUN, expireDue, runDeadlineJob } from "../app/lib/jobs.server";
 import { confirmPayment } from "../app/lib/payments.server";
+import { setMembershipVerified } from "../app/lib/payments.server";
 import { registerOnline } from "../app/lib/registration.server";
 import { T0, decodeQrPng, emailCfg, hours, input, resetDb, startDb } from "./helpers";
 
@@ -25,10 +26,17 @@ const sentMails = async () =>
 const logRow = (id: string, kind: string) =>
   db.prepare("SELECT status, attempts, sent_at FROM email_log WHERE registration_id = ? AND kind = ?").bind(id, kind).first<{ status: string; attempts: number; sent_at: string | null }>();
 
-async function member(people = 1) {
+/** A member who registered and is waiting for validation (no QR code yet). */
+async function waitingMember(people = 1) {
   const r = await registerOnline(db, event, input({ people }), opts());
-  if (r.kind !== "accepted") throw new Error(r.kind);
+  if (r.kind !== "pending_membership") throw new Error(r.kind);
   return r.registrationId;
+}
+/** A member who registered and was validated by an admin: accepted, ticket codes issued, QR email queued. */
+async function member(people = 1) {
+  const id = await waitingMember(people);
+  expect((await setMembershipVerified(db, id, "admin@x.nl", true, opts().now)).ok).toBe(true);
+  return id;
 }
 async function nonMember(people = 1) {
   const r = await registerOnline(db, event, input({ membership: "Tidak", people }), opts());
@@ -37,10 +45,26 @@ async function nonMember(people = 1) {
 }
 
 describe("the email is recorded in the same transaction as the change", () => {
-  it("member registration -> pending 'confirmation' row, and nothing has been sent yet", async () => {
-    const id = await member();
-    expect(await logRow(id, "confirmation")).toMatchObject({ status: "pending", attempts: 0, sent_at: null });
+  it("member registration -> pending 'membership_pending' row only (no QR email yet), nothing sent", async () => {
+    const id = await waitingMember();
+    expect(await logRow(id, "membership_pending")).toMatchObject({ status: "pending", attempts: 0, sent_at: null });
+    expect(await logRow(id, "confirmation")).toBeNull();
     expect(await sentMails()).toHaveLength(0);
+  });
+
+  it("validating a member records the pending QR 'confirmation' row in the same batch", async () => {
+    const id = await waitingMember(2);
+    expect(await logRow(id, "confirmation")).toBeNull();
+    expect((await setMembershipVerified(db, id, "admin@x.nl", true, opts().now)).ok).toBe(true);
+    expect(await logRow(id, "confirmation")).toMatchObject({ status: "pending", attempts: 0, sent_at: null });
+  });
+
+  it("a refused validation (rejected first) records no QR email", async () => {
+    const id = await waitingMember();
+    await db.prepare("UPDATE registrations SET status = 'rejected_membership' WHERE id = ?").bind(id).run();
+    await db.prepare("UPDATE participants SET status = 'accepted' WHERE registration_id = ?").bind(id).run(); // wrong participant state
+    expect((await setMembershipVerified(db, id, "admin@x.nl", true, opts().now)).ok).toBe(false);
+    expect(await logRow(id, "confirmation")).toBeNull();
   });
 
   it("non-member registration -> pending 'payment_instructions' row", async () => {
@@ -51,11 +75,11 @@ describe("the email is recorded in the same transaction as the change", () => {
 
   it("a quota rejection sends nothing and records no email", async () => {
     event = await resetDb(db, { member: 1 });
-    await member();
+    await waitingMember();
     const r = await registerOnline(db, event, input({ people: 2 }), opts());
     expect(r.kind).toBe("rejected_quota");
     const n = await db.prepare("SELECT COUNT(*) AS n FROM email_log").first<{ n: number }>();
-    expect(n!.n).toBe(1); // only the accepted member's row
+    expect(n!.n).toBe(1); // only the waiting member's notice
   });
 
   it("approving a payment records the pending QR email in the same batch", async () => {
@@ -90,13 +114,54 @@ describe("the lost-email scenario: the Worker is killed right after the data was
     const mails = await sentMails();
     expect(mails).toHaveLength(1);
     expect(mails[0]).toMatchObject({ kind: "confirmation" });
-    const qrs = JSON.parse(mails[0].attachments_json) as { contentBase64: string }[];
+    const all = JSON.parse(mails[0].attachments_json) as { contentBase64: string; contentId?: string; contentType: string }[];
+    expect(all.filter((a) => a.contentType === "text/calendar; charset=utf-8")).toHaveLength(1); // the .ics
+    const qrs = all.filter((a) => a.contentId); // inline QR images
     const tokens = (await getParticipants(db, id)).map((p) => p.qr_token);
     expect(qrs.map((q) => decodeQrPng(Uint8Array.from(Buffer.from(q.contentBase64, "base64"))))).toEqual(tokens);
     expect(await logRow(id, "confirmation")).toMatchObject({ status: "sent", attempts: 1 });
 
     expect((await runDeadlineJob(db, emailCfg, minutes(10))).retried).toBe(0); // and never twice
     expect(await sentMails()).toHaveLength(1);
+  });
+
+  it("validating many members never makes one run render every QR: the sweeper sends QR emails in batches", async () => {
+    // 4 families of 4 = 16 QR codes, all validated at once (validation itself only writes rows)
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i++) ids.push(await member(4));
+    expect(await sentMails()).toHaveLength(0);
+
+    const run1 = await runDeadlineJob(db, emailCfg, minutes(5));
+    expect(QR_BUDGET_PER_RUN).toBe(8);
+    expect(run1).toMatchObject({ retried: 2, deferred: 2 }); // 2 x 4 QR = the budget of one run
+    expect(await sentMails()).toHaveLength(2);
+
+    const run2 = await runDeadlineJob(db, emailCfg, minutes(10));
+    expect(run2).toMatchObject({ retried: 2, deferred: 0 });
+    const mails = await sentMails();
+    expect(mails).toHaveLength(4);
+    expect(new Set(mails.map((m) => m.to_address)).size).toBe(4); // every family got exactly one
+    for (const id of ids) expect(await logRow(id, "confirmation")).toMatchObject({ status: "sent" });
+  });
+
+  it("a single family larger than the budget is still sent (the first email of a run always goes)", async () => {
+    const id = await member(8);
+    await member(1);
+    const run = await runDeadlineJob(db, emailCfg, minutes(5));
+    expect(run).toMatchObject({ retried: 1, deferred: 1 });
+    expect(await logRow(id, "confirmation")).toMatchObject({ status: "sent" });
+  });
+
+  it("rejecting a waiting member frees the seats and the stale notice is not sent", async () => {
+    event = await resetDb(db, { member: 1 });
+    const id = await waitingMember(1);
+    expect((await registerOnline(db, event, input(), opts())).kind).toBe("rejected_quota"); // seat is held
+    const { rejectMembership } = await import("../app/lib/payments.server");
+    expect((await rejectMembership(db, id, "admin@x.nl", opts().now)).ok).toBe(true);
+    expect((await registerOnline(db, event, input(), opts())).kind).toBe("pending_membership"); // seat is free again
+    const run = await runDeadlineJob(db, emailCfg, minutes(5));
+    expect(run.retried).toBe(1); // only the new member's notice; the rejected one's notice is skipped
+    expect((await sentMails()).map((m) => m.kind)).toEqual(["membership_pending"]);
   });
 
   it("payment approval: the QR email still goes out", async () => {

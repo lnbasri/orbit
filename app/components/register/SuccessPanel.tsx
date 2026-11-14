@@ -5,6 +5,7 @@ import {
   ClockIcon,
   EnvelopeIcon,
   HashtagIcon,
+  IdentificationIcon,
   PencilSquareIcon,
   QrCodeIcon,
   UsersIcon,
@@ -17,6 +18,7 @@ import { formatDateTime, formatEuro } from "~/lib/format";
 import { EventDetailRow } from "./EventDetailRow";
 
 export type SuccessResult =
+  | { ok: true; kind: "pending_membership"; people: number; email: string }
   | { ok: true; kind: "accepted"; people: number; email: string }
   | {
       ok: true;
@@ -40,6 +42,7 @@ export function SuccessPanel({
   manageUrl: string;
 }) {
   const accepted = result.kind === "accepted";
+  const membership = result.kind === "pending_membership";
   return (
     <>
       <header className="px-5 pt-7 sm:px-8 sm:pt-10 lg:px-10 lg:pt-12">
@@ -51,10 +54,14 @@ export function SuccessPanel({
               ) : (
                 <ClockIcon className="size-4" aria-hidden="true" />
               )}
-              {accepted ? "Pendaftaran berhasil" : "Langkah terakhir"}
+              {accepted ? "Pendaftaran berhasil" : membership ? "Pendaftaran dicatat" : "Langkah terakhir"}
             </Eyebrow>
             <h1 className="text-gradient-brand mt-3 text-[1.75rem] leading-[1.12] font-bold tracking-tight text-balance sm:text-4xl">
-              {accepted ? "Pendaftaran diterima" : "Pendaftaran dicatat – menunggu pembayaran"}
+              {accepted
+                ? "Pendaftaran diterima"
+                : membership
+                  ? "Pendaftaran dicatat – menunggu validasi keanggotaan"
+                  : "Pendaftaran dicatat – menunggu pembayaran"}
             </h1>
             <p className="mt-2 text-sm text-slate-500">{eventTitle}</p>
           </div>
@@ -62,7 +69,29 @@ export function SuccessPanel({
         </div>
       </header>
 
-      {result.kind === "accepted" ? (
+      {result.kind === "pending_membership" ? (
+        <>
+          <dl className="mt-8 grid gap-px border-y border-slate-200/80 bg-slate-200/80 sm:grid-cols-2">
+            <EventDetailRow icon={UsersIcon} label="Jumlah peserta" value={`${result.people} orang`} sub="Gratis untuk anggota" />
+            <EventDetailRow
+              icon={EnvelopeIcon}
+              label="Dikirim ke"
+              value={<span className="break-all">{result.email}</span>}
+              sub="Periksa juga folder spam"
+            />
+          </dl>
+          <div className="px-5 py-8 sm:px-8 lg:px-10">
+            <Callout tone="warning" icon={IdentificationIcon} title="QR Code dikirim setelah keanggotaan divalidasi">
+              <p>
+                Panitia akan memeriksa keanggotaan Anda di daftar anggota PPME Den Haag. Setelah divalidasi, email
+                konfirmasi beserta QR Code setiap peserta dikirim ke{" "}
+                <span className="font-semibold">{result.email}</span>. Pemberitahuan bahwa pendaftaran Anda diterima
+                sudah dikirim ke alamat yang sama.
+              </p>
+            </Callout>
+          </div>
+        </>
+      ) : result.kind === "accepted" ? (
         <>
           <dl className="mt-8 grid gap-px border-y border-slate-200/80 bg-slate-200/80 sm:grid-cols-2">
             <EventDetailRow icon={UsersIcon} label="Jumlah peserta" value={`${result.people} orang`} sub="Gratis untuk anggota" />
@@ -127,7 +156,7 @@ export function SuccessPanel({
       <div className="border-t border-slate-200/80 bg-slate-50/70 px-5 py-5 sm:px-8 lg:px-10">
         <p className="flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
           <span>
-            {result.kind === "accepted"
+            {result.kind === "accepted" || result.kind === "pending_membership"
               ? "Perlu mengubah data peserta? Anda dapat melakukannya sendiri selama pendaftaran masih dibuka."
               : "Perlu mengubah data peserta? Anda dapat melakukannya sendiri sebelum pembayaran dikonfirmasi."}
           </span>

@@ -1,10 +1,12 @@
 import { AGE_GROUP_SHORT } from "../format";
 import { getEventById, getParticipants, getRegistration } from "../db.server";
 import { bytesToBase64 } from "../png";
+import { calendarLinks, icsAttachment } from "./calendar";
 import { qrPng } from "../qr";
 import { selfEditState } from "../self-service.server";
 import {
   confirmationEmail,
+  membershipPendingEmail,
   type ManageInfo,
   expiredEmail,
   paymentInstructionsEmail,
@@ -12,7 +14,7 @@ import {
   type BankInfo,
 } from "./templates";
 
-export type EmailKind = "confirmation" | "payment_instructions" | "reminder" | "expired";
+export type EmailKind = "confirmation" | "payment_instructions" | "reminder" | "expired" | "membership_pending";
 
 export interface EmailConfig {
   mode: "log" | "resend";
@@ -27,7 +29,8 @@ export interface EmailConfig {
 export interface Attachment {
   filename: string;
   contentBase64: string;
-  contentId: string;
+  /** Set for images referenced from the HTML (cid:); left out for ordinary attachments such as the .ics file. */
+  contentId?: string;
   contentType: string;
 }
 
@@ -56,9 +59,27 @@ async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: stri
     paid: !state.editable && state.reason === "paid",
     contact: cfg.replyTo,
     // Shown when the email went out because of a self-service edit (edits always happen before a payment).
-    updated: !!reg.updated_at && (!reg.paid_at || reg.updated_at > reg.paid_at),
+    // (a payment confirmation or a membership validation after the last edit makes the email "new", not "updated")
+    updated:
+      !!reg.updated_at &&
+      (!reg.paid_at || reg.updated_at > reg.paid_at) &&
+      (!reg.membership_verified_at || reg.updated_at > reg.membership_verified_at),
   };
   const rev = reg.edit_rev;
+
+  if (kind === "membership_pending") {
+    if (reg.status !== "pending_membership") throw new Error("Pendaftaran ini tidak sedang menunggu validasi anggota.");
+    const people = (await getParticipants(db, registrationId)).length;
+    const { subject, html } = membershipPendingEmail({
+      event,
+      registrantName: reg.registrant_name,
+      people,
+      manage,
+      contact: cfg.replyTo,
+      origin: cfg.publicUrl,
+    });
+    return { to: reg.email, subject, html, attachments: [], rev };
+  }
 
   if (kind === "confirmation") {
     if (reg.status !== "accepted") throw new Error("Pendaftaran ini belum diterima.");
@@ -86,10 +107,13 @@ async function buildEmail(db: D1Database, cfg: EmailConfig, registrationId: stri
         category,
         cid: `qr${i + 1}`,
       })),
+      calendar: calendarLinks(event),
+      member: reg.is_member === 1,
       manage,
       contact: cfg.replyTo,
       origin: cfg.publicUrl,
     });
+    attachments.push(icsAttachment(event, now)); // "add to calendar" for Apple/Outlook/Thunderbird (and Google via import)
     return { to: reg.email, subject, html, attachments, rev };
   }
 
@@ -177,7 +201,7 @@ async function transport(
       attachments: msg.attachments.map((a) => ({
         filename: a.filename,
         content: a.contentBase64,
-        content_id: a.contentId,
+        ...(a.contentId ? { content_id: a.contentId } : {}),
         content_type: a.contentType,
       })),
     }),

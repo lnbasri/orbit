@@ -55,7 +55,9 @@ export async function action({ request, context }: Route.ActionArgs) {
 /** Quick actions for one record: verify / reject an unverified member, confirm a pending payment. */
 function rowActions(r: RegistrationListRow) {
   return {
-    member: !!r.is_member && r.status === "accepted" && !r.membership_verified_at,
+    member:
+      !!r.is_member &&
+      (r.status === "pending_membership" || (r.status === "accepted" && !r.membership_verified_at)),
     payment: r.effective_status === "pending_payment" && r.payment_status === "pending",
     revive: !!r.is_member && r.status === "rejected_membership",
   };
@@ -105,6 +107,7 @@ function RowActions({ r }: { r: RegistrationListRow }) {
               description: (
                 <>
                   Apakah <strong>{name}</strong> sudah dicek dan benar terdaftar di daftar anggota PPME Den Haag?
+                  {r.status === "pending_membership" ? " Pendaftaran akan diterima dan QR Code langsung dikirim ke pendaftar." : null}
                 </>
               ),
               confirmLabel: "Ya, anggota valid",
@@ -124,8 +127,8 @@ function RowActions({ r }: { r: RegistrationListRow }) {
               title: "Tolak pendaftaran",
               description: (
                 <>
-                  Keanggotaan <strong>{name}</strong> tidak dapat divalidasi? Pendaftaran akan ditolak, QR Code
-                  dibatalkan dan kursi dibebaskan. Tidak ada email otomatis yang dikirim.
+                  Keanggotaan <strong>{name}</strong> tidak dapat divalidasi? Pendaftaran akan ditolak dan kursi
+                  dibebaskan (QR Code yang sudah ada dibatalkan). Tidak ada email otomatis yang dikirim.
                 </>
               ),
               confirmLabel: "Ya, tolak",
@@ -169,6 +172,7 @@ const STATUS_OPTIONS: SelectOption[] = [
   { value: "", label: "Semua status" },
   { value: "accepted", label: "Diterima" },
   { value: "pending_payment", label: "Menunggu pembayaran" },
+  { value: "pending_membership", label: "Menunggu validasi anggota" },
   { value: "expired", label: "Kedaluwarsa" },
   { value: "rejected_quota", label: "Ditolak (kuota)" },
   { value: "rejected_membership", label: "Ditolak (keanggotaan tidak valid)" },
@@ -331,8 +335,8 @@ export default function Registrations({ loaderData }: Route.ComponentProps) {
                       <td className="px-4 py-4 text-slate-700">
                         {r.is_member ? "Anggota" : "Non-anggota"}
                         {r.source === "manual" ? <span className="ml-1 text-xs text-slate-500">(manual)</span> : null}
-                        {r.is_member && r.status === "accepted" && !r.membership_verified_at ? (
-                          <div className="text-xs text-amber-700">belum diverifikasi</div>
+                        {r.is_member && (r.status === "pending_membership" || (r.status === "accepted" && !r.membership_verified_at)) ? (
+                          <div className="text-xs text-amber-700">belum divalidasi</div>
                         ) : null}
                       </td>
                       <td className="px-4 py-4 text-right text-slate-700 tabular-nums">{r.people}</td>

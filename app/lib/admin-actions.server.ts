@@ -8,7 +8,7 @@ import { confirmPayment, deleteRegistration, rejectMembership, setMembershipVeri
 
 export type AdminActionResult = { ok: boolean; message: string };
 
-const EMAIL_KINDS: EmailKind[] = ["confirmation", "payment_instructions", "reminder", "expired"];
+const EMAIL_KINDS: EmailKind[] = ["confirmation", "payment_instructions", "reminder", "expired", "membership_pending"];
 
 /** Shared POST handler for admin pages. `intent` selects the operation. */
 export async function handleAdminIntent(env: AppEnv, actor: string, form: FormData): Promise<AdminActionResult> {
@@ -31,12 +31,16 @@ export async function handleAdminIntent(env: AppEnv, actor: string, form: FormDa
     }
     case "verify-membership": {
       const res = await setMembershipVerified(env.DB, id, actor, true);
-      if (!res.ok || !res.revived) return res;
-      // Re-activated after a rejection: the old QR codes were removed, so send the new ones right away.
+      if (!res.ok || !res.activated) return res;
+      // The member is accepted and the ticket codes exist. The QR email is already queued in the outbox; try to send it
+      // right away (one registration per click, so one Worker invocation only generates this family's QR codes). When
+      // that fails or is skipped, the 5-minute cron sweeps it (in small batches, see runDeadlineJob).
       const mail = await deliverEmail(env.DB, cfg, id, "confirmation");
       return {
         ok: true,
-        message: mail.ok ? res.message : `${res.message} Email QR gagal dikirim (${mail.error}); sistem akan mencoba lagi.`,
+        message: mail.ok
+          ? `${res.message}${mail.skipped ? " (email sedang diproses)" : ""}`
+          : `${res.message} Namun email QR gagal dikirim (${mail.error}); sistem akan mencoba lagi otomatis.`,
       };
     }
     case "delete-registration":
@@ -94,7 +98,7 @@ export async function handleAdminIntent(env: AppEnv, actor: string, form: FormDa
       await audit(env.DB, actor, "job.run", null, report);
       return {
         ok: true,
-        message: `Job selesai: ${report.expired} kedaluwarsa, ${report.reminders} pengingat, ${report.retried} email dicoba ulang.`,
+        message: `Job selesai: ${report.expired} kedaluwarsa, ${report.reminders} pengingat, ${report.retried} email dicoba ulang${report.deferred ? `, ${report.deferred} email QR menunggu giliran berikutnya` : ""}.`,
       };
     }
     default:

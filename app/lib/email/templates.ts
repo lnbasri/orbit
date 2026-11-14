@@ -1,6 +1,6 @@
 // Email bodies ported from the Apps Script version (Code.gs), with the stray markup fixed (B9).
 // Layout and building blocks live in ./layout (same look as the login-code email).
-import { formatDateTime, formatEuro, formatLongDate, formatTime } from "../format";
+import { formatDateTime, formatEuro, formatHijriDate, formatLongDate, formatTime } from "../format";
 import { registrationRules } from "../rules";
 import {
   BRAND,
@@ -123,8 +123,10 @@ export function rulesSection(e: EventInfo) {
   return heading("Ketentuan Pendaftaran") + bullets(items);
 }
 
-const eventDate = (e: EventInfo) =>
-  `${formatLongDate(e.starts_at)}, ${formatTime(e.starts_at)}–${formatTime(e.ends_at)} waktu Belanda`;
+const eventDate = (e: EventInfo) => {
+  const hijri = formatHijriDate(e.starts_at);
+  return `${formatLongDate(e.starts_at)}${hijri ? ` (${hijri})` : ""}, ${formatTime(e.starts_at)}–${formatTime(e.ends_at)} waktu Belanda`;
+};
 
 const greeting = (name: string) => para(`Yth. ${escapeHtml(name)},`, "0 0 12px 0");
 
@@ -133,10 +135,14 @@ export function confirmationEmail(
     event: EventInfo;
     registrantName: string;
     participants: { name: string; ageGroup: string; category: string; cid: string }[];
+    /** Links to add the event to Google Calendar / Outlook.com (the .ics file is attached by the sender). */
+    calendar?: { google: string; outlook: string };
+    /** Member: the QR codes were issued because the committee validated the membership. */
+    member?: boolean;
     manage?: ManageInfo;
   } & Common,
 ) {
-  const { event, registrantName, participants, manage, contact, origin } = args;
+  const { event, registrantName, participants, calendar, member, manage, contact, origin } = args;
   const cards = participants
     .map(
       (p, i) =>
@@ -164,7 +170,9 @@ export function confirmationEmail(
     updatedNotice(manage) +
     para(`Terima kasih telah mendaftarkan diri dan keluarga untuk mengikuti <strong>${escapeHtml(event.title)}</strong>.`) +
     callout(
-      `<strong style="color:#14532D;">Pendaftaran Anda telah DITERIMA.</strong> QR Code untuk check-in ada di bawah.`,
+      member
+        ? `<strong style="color:#14532D;">Keanggotaan Anda telah divalidasi dan pendaftaran Anda DITERIMA.</strong> QR Code untuk check-in ada di bawah.`
+        : `<strong style="color:#14532D;">Pendaftaran Anda telah DITERIMA.</strong> QR Code untuk check-in ada di bawah.`,
       "#16A34A",
       "#F0FDF4",
       "#166534",
@@ -172,6 +180,7 @@ export function confirmationEmail(
     manageSection(manage) +
     heading("Informasi Acara") +
     detailTable(info) +
+    calendarSection(calendar) +
     heading("QR Code Peserta") +
     para("Berikut QR Code untuk masing-masing peserta yang telah terdaftar:", "0 0 14px 0") +
     cards +
@@ -207,6 +216,26 @@ export function confirmationEmail(
     contact,
   });
   return { subject, html };
+}
+
+/** "Simpan di kalender": web links plus a pointer to the attached .ics file. Left out when no links are given. */
+function calendarSection(c: { google: string; outlook: string } | undefined) {
+  if (!c) return "";
+  const item = (label: string, url: string) =>
+    `<a href="${escapeHtml(url)}" target="_blank" style="color:${BRAND};font-weight:bold;">${escapeHtml(label)}</a>`;
+  return (
+    heading("Simpan di Kalender") +
+    para(
+      `Tambahkan acara ini ke kalender Anda: ${item("Google Calendar", c.google)} &middot; ${item("Outlook.com", c.outlook)}.`,
+      "0 0 6px 0",
+    ) +
+    para(
+      small(
+        "Untuk Apple Calendar, Outlook di komputer atau aplikasi kalender lain, buka lampiran <strong>kajian-ppme-den-haag.ics</strong> pada email ini. Pengingat otomatis diatur 1 hari sebelum acara.",
+      ),
+      "0 0 8px 0",
+    )
+  );
 }
 
 /** Payment code panel + bank details, shared by the payment instructions and the reminder. */
@@ -327,6 +356,51 @@ export function expiredEmail(args: { event: EventInfo; registrantName: string; p
     body,
     origin: a.origin,
     contact: a.contact,
+  });
+  return { subject, html };
+}
+
+/** Member registration received; the QR code follows once the committee has validated the membership. */
+export function membershipPendingEmail(
+  args: {
+    event: EventInfo;
+    registrantName: string;
+    people: number;
+    manage?: ManageInfo;
+  } & Common,
+) {
+  const { event, registrantName, people, manage, contact, origin } = args;
+  const info: [string, string][] = [
+    ["Acara", `${event.title}${event.speaker ? " bersama " + event.speaker : ""}`],
+    ["Hari/Tanggal", eventDate(event)],
+    ["Jumlah peserta", `${people} orang`],
+    ["Keanggotaan", "Anggota PPME Den Haag (menunggu validasi panitia)"],
+  ];
+  const body =
+    greeting(registrantName) +
+    updatedNotice(manage) +
+    para(`Terima kasih telah mendaftarkan diri dan keluarga untuk mengikuti <strong>${escapeHtml(event.title)}</strong>.`) +
+    callout(
+      `<strong>Pendaftaran Anda telah kami terima dan sedang menunggu validasi keanggotaan.</strong><br>` +
+        `Panitia akan memeriksa keanggotaan Anda di daftar anggota PPME Den Haag. <strong>QR Code untuk check-in akan dikirim melalui email setelah keanggotaan Anda divalidasi.</strong>`,
+    ) +
+    detailTable(info) +
+    para(
+      "Apabila keanggotaan tidak dapat dipastikan, panitia/pengurus PPME Den Haag berhak membatalkan pendaftaran. Dalam hal ini Bapak/Ibu tetap dapat mendaftar kembali sebagai non-anggota selama kuota masih tersedia.",
+      "14px 0",
+    ) +
+    manageSection(manage) +
+    rulesSection(event);
+  const subject = `${manage?.updated ? "Pembaruan " : ""}Pendaftaran ${event.title} Diterima – Menunggu Validasi Keanggotaan`;
+  const html = emailShell({
+    subject,
+    label: "Menunggu Validasi",
+    eyebrow: manage?.updated ? "Pendaftaran diperbarui" : "Menunggu validasi",
+    title: "Menunggu validasi keanggotaan",
+    preheader: `Pendaftaran Anda diterima. QR Code dikirim setelah panitia memvalidasi keanggotaan Anda.`,
+    body,
+    origin,
+    contact,
   });
   return { subject, html };
 }

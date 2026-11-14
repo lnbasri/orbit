@@ -13,7 +13,8 @@ import { googleConfig } from "../app/lib/google-oauth.server";
 import { generateCode, normalizeCode } from "../app/lib/login-codes.server";
 import { bankConfigured, featureEnabled } from "../app/lib/config.server";
 import { buildTimeline } from "../app/lib/admin.server";
-import { daysUntil, exportRowsToIndonesian } from "../app/lib/format";
+import { daysUntil, exportRowsToIndonesian, formatHijriDate, seatCount } from "../app/lib/format";
+import { buildIcs, calendarLinks } from "../app/lib/email/calendar";
 import { toCsv } from "../app/lib/csv";
 import { verifyTurnstile } from "../app/lib/turnstile.server";
 import { formToRegistrationDraft, normalizeWhatsapp, registrationSchema, validateRegistrationDraft } from "../app/lib/validation";
@@ -293,5 +294,59 @@ describe("dashboard chart data", () => {
       { date: "2026-11-13", member: 0, nonMember: 0 },
     ]);
     expect(buildTimeline([], new Date())).toEqual([]);
+  });
+});
+
+describe("Hijri date", () => {
+  it("5 Dec 2026 is 25 Jumadil Akhir 1448 H (Umm al-Qura), in Amsterdam time", () => {
+    expect(formatHijriDate("2026-12-05T08:00:00.000Z")).toBe("25 Jumadil Akhir 1448 H");
+    expect(formatHijriDate("2026-12-04T08:00:00.000Z")).toBe("24 Jumadil Akhir 1448 H");
+    expect(formatHijriDate("not a date")).toBe("");
+  });
+});
+
+describe("quota seats", () => {
+  it("only remaja and dewasa count", () => {
+    expect(seatCount([{ ageGroup: "dewasa" }, { ageGroup: "remaja" }, { ageGroup: "anak" }, { ageGroup: "balita" }])).toBe(2);
+    expect(seatCount([{ ageGroup: "anak" }, { ageGroup: "balita" }])).toBe(0);
+  });
+});
+
+describe("add to calendar", () => {
+  const ev = {
+    slug: "kajian-aisah-dahlan-2026",
+    title: "Kajian PPME Den Haag 2026",
+    speaker: "dr. Aisah Dahlan",
+    theme: "Perbedaan otak laki-laki dan perempuan, tes; koma",
+    starts_at: "2026-12-05T08:00:00.000Z",
+    ends_at: "2026-12-05T13:30:00.000Z",
+    info_url: null,
+  };
+
+  it("builds a valid, escaped, folded .ics with UTC times and a stable UID", () => {
+    const ics = buildIcs(ev, new Date("2026-11-20T10:00:00.000Z"));
+    expect(ics.startsWith("BEGIN:VCALENDAR\r\n")).toBe(true);
+    expect(ics.endsWith("END:VCALENDAR\r\n")).toBe(true);
+    expect(ics).toContain("UID:kajian-aisah-dahlan-2026@event.ppmedenhaag.nl");
+    expect(ics).toContain("DTSTART:20261205T080000Z");
+    expect(ics).toContain("DTEND:20261205T133000Z");
+    expect(ics).toContain("DTSTAMP:20261120T100000Z");
+    expect(ics).toContain("SUMMARY:Kajian PPME Den Haag 2026 bersama dr. Aisah Dahlan");
+    expect(ics.replace(/\r\n /g, "")).toContain(String.raw`otak laki-laki dan perempuan\, tes\; koma`); // , and ; escaped
+    for (const line of ics.split("\r\n")) expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75);
+    expect(ics).not.toMatch(/[^\r]\n/); // CRLF only
+    expect(ics).toContain("TRIGGER:-P1D");
+  });
+
+  it("links prefill Google Calendar and Outlook.com with the event time in UTC and carry no personal data", () => {
+    const { google, outlook } = calendarLinks(ev);
+    const g = new URL(google);
+    expect(g.origin + g.pathname).toBe("https://calendar.google.com/calendar/render");
+    expect(g.searchParams.get("dates")).toBe("20261205T080000Z/20261205T133000Z");
+    expect(g.searchParams.get("text")).toContain("Kajian PPME Den Haag 2026");
+    const o = new URL(outlook);
+    expect(o.origin).toBe("https://outlook.live.com");
+    expect(o.searchParams.get("startdt")).toBe("2026-12-05T08:00:00.000Z");
+    expect(o.searchParams.get("enddt")).toBe("2026-12-05T13:30:00.000Z");
   });
 });
