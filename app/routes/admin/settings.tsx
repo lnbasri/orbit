@@ -7,6 +7,7 @@ import {
   BanknotesIcon,
   CheckCircleIcon,
   ExclamationTriangleIcon,
+  HeartIcon,
   ClockIcon,
   InformationCircleIcon,
   LockClosedIcon,
@@ -46,6 +47,7 @@ export async function loader() {
     locationName: event.location_name ?? "",
     locationAddress: event.location_address ?? "",
     locationMapUrl: event.location_map_url ?? "",
+    infaqUrl: event.infaq_url ?? "",
     startsAt: event.starts_at,
     startsAtLocal: utcIsoToLocalInput(event.starts_at),
     endsAtLocal: utcIsoToLocalInput(event.ends_at),
@@ -64,7 +66,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { title, speaker, theme, locationName, locationAddress, locationMapUrl, startsAt, startsAtLocal, endsAtLocal, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota, selfAdd } = loaderData;
+  const { title, speaker, theme, locationName, locationAddress, locationMapUrl, infaqUrl, startsAt, startsAtLocal, endsAtLocal, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota, selfAdd } = loaderData;
   const fetcher = useFetcher<{ ok: boolean; message: string }>();
   const timesFetcher = useFetcher<{ ok: boolean; message: string }>();
   const timesBusy = timesFetcher.state !== "idle";
@@ -72,6 +74,8 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
   const detailsBusy = detailsFetcher.state !== "idle";
   const locationFetcher = useFetcher<{ ok: boolean; message: string }>();
   const locationBusy = locationFetcher.state !== "idle";
+  const infaqFetcher = useFetcher<{ ok: boolean; message: string }>();
+  const infaqBusy = infaqFetcher.state !== "idle";
   const priceFetcher = useFetcher<{ ok: boolean; message: string }>();
   const priceBusy = priceFetcher.state !== "idle";
   const busy = fetcher.state !== "idle";
@@ -204,6 +208,30 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
         </ul>
       </Panel>
 
+      <Panel title="Infaq sukarela" icon={HeartIcon} className="mt-6">
+        <infaqFetcher.Form method="post" className="grid gap-4">
+          <input type="hidden" name="intent" value="save-event-infaq" />
+          <TextField name="infaqUrl" label="Tautan pembayaran infaq" defaultValue={infaqUrl} maxLength={300} placeholder="https://www.ing.nl/payreq/m/…" />
+          <div>
+            <button type="submit" disabled={infaqBusy} className={buttonClass("primary", "md", "w-full sm:w-auto")}>
+              {infaqBusy ? <Spinner /> : <CheckCircleIcon className="size-4" aria-hidden="true" />}
+              {infaqBusy ? "Menyimpan…" : "Simpan tautan infaq"}
+            </button>
+            <button type="reset" disabled={infaqBusy} className={buttonClass("secondary", "md", "mt-2 w-full sm:mt-0 sm:ml-2 sm:w-auto")}>
+              <ArrowUturnLeftIcon className="size-4" aria-hidden="true" />
+              Reset
+            </button>
+          </div>
+        </infaqFetcher.Form>
+        <Notice result={infaqFetcher.data} className="mt-4" />
+        <ul className="mt-6 space-y-2 border-t border-slate-100 pt-5 text-xs text-slate-500">
+          <Hint icon={InformationCircleIcon}>
+            Tombol "Berikan Infaq" di email konfirmasi. Harus berupa alamat https://. Kosongkan untuk menyembunyikan seluruh blok
+            infaq dari email. Email yang sudah terkirim tidak berubah.
+          </Hint>
+        </ul>
+      </Panel>
+
       <Panel title="Kapasitas (kuota)" icon={UsersIcon} className="mt-6">
         <QuotaForm quota={quota} />
       </Panel>
@@ -242,7 +270,12 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
         </priceFetcher.Form>
         <Notice result={priceFetcher.data} className="mt-4" />
         <ul className="mt-6 space-y-2 border-t border-slate-100 pt-5 text-xs text-slate-500">
-          <Hint icon={BanknotesIcon}>Biaya saat ini: {formatEuro(priceCents)} per orang remaja/dewasa. Balita, anak, dan anggota gratis.</Hint>
+          <Hint icon={BanknotesIcon}>
+            {priceCents === 0
+              ? "Biaya saat ini: GRATIS. Non-anggota langsung diterima dan QR Code dikirim lewat email oleh cron (maksimal sekitar 10 menit); tidak ada instruksi pembayaran."
+              : `Biaya saat ini: ${formatEuro(priceCents)} per orang remaja/dewasa. Balita, anak, dan anggota gratis.`}
+          </Hint>
+          <Hint icon={InformationCircleIcon}>Isi 0 untuk acara gratis bagi non-anggota. Anggota tetap menunggu validasi keanggotaan.</Hint>
           <Hint icon={InformationCircleIcon}>Setiap perubahan dicatat di audit log.</Hint>
         </ul>
       </Panel>

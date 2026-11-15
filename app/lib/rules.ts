@@ -40,13 +40,16 @@ export function registrationRules(e: RuleEventInfo): RegistrationRule[] {
     },
     {
       key: "fee",
-      parts: [
-        { b: "Anggota PPME Den Haag gratis. Non-anggota: " },
-        { b: `${formatEuro(e.priceCents)} per orang` },
-        " untuk remaja dan dewasa (balita dan anak gratis), dibayar dalam ",
-        { b: `${e.payWindowHours} jam` },
-        " setelah mendaftar.",
-      ],
+      parts:
+        e.priceCents === 0
+          ? [{ b: "Acara ini gratis, baik untuk anggota maupun non-anggota PPME Den Haag." }]
+          : [
+              { b: "Anggota PPME Den Haag gratis. Non-anggota: " },
+              { b: `${formatEuro(e.priceCents)} per orang` },
+              " untuk remaja dan dewasa (balita dan anak gratis), dibayar dalam ",
+              { b: `${e.payWindowHours} jam` },
+              " setelah mendaftar.",
+            ],
     },
     {
       key: "membership",
@@ -60,7 +63,14 @@ export function registrationRules(e: RuleEventInfo): RegistrationRule[] {
         " Dalam hal ini Bapak/Ibu tetap dapat mendaftar kembali sebagai non-anggota selama kuota masih tersedia. Mohon pengertian Bapak/Ibu.",
       ],
     },
-    { key: "qr", parts: ["QR Code dikirim lewat email setelah pembayaran dikonfirmasi (non-anggota) atau keanggotaan Anda divalidasi panitia (anggota)."] },
+    {
+      key: "qr",
+      parts: [
+        e.priceCents === 0
+          ? "QR Code dikirim lewat email dalam beberapa menit setelah Anda mendaftar (non-anggota) atau setelah keanggotaan Anda divalidasi panitia (anggota)."
+          : "QR Code dikirim lewat email setelah pembayaran dikonfirmasi (non-anggota) atau keanggotaan Anda divalidasi panitia (anggota).",
+      ],
+    },
     { key: "email", parts: [{ b: "Pastikan alamat email Anda benar, dan periksa juga folder spam." }] },
     { key: "once", parts: ["Setiap QR Code hanya dapat digunakan satu kali saat check-in."] },
     {

@@ -140,9 +140,11 @@ describe("admin: event price", () => {
     expect(await db.prepare("SELECT 1 FROM audit_log WHERE action = 'event.price'").first()).toBeTruthy();
   });
 
-  it("rejects invalid or zero price", async () => {
-    expect((await updateEventPrice(db, "a@x.nl", 1, "0")).ok).toBe(false);
+  it("rejects invalid or negative price, accepts 0 (free event)", async () => {
     expect((await updateEventPrice(db, "a@x.nl", 1, "x")).ok).toBe(false);
+    expect((await updateEventPrice(db, "a@x.nl", 1, "-5")).ok).toBe(false);
+    expect((await updateEventPrice(db, "a@x.nl", 1, "0")).ok).toBe(true);
+    expect((await getEventById(db, 1))!.price_non_member_cents).toBe(0);
   });
 });
 

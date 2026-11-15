@@ -129,6 +129,11 @@ export function ReviewDialog({
                     <span className="font-semibold text-slate-900">Biaya: gratis</span>{" "}
                     <span className="text-slate-600">(anggota PPME Den Haag).</span>
                   </p>
+                ) : priceCents === 0 ? (
+                  <p>
+                    <span className="font-semibold text-slate-900">Biaya: gratis.</span>{" "}
+                    <span className="text-slate-600">Tidak ada pembayaran; QR Code dikirim lewat email dalam beberapa menit.</span>
+                  </p>
                 ) : (
                   <p className="text-slate-600">
                     <span className="font-semibold text-slate-900">

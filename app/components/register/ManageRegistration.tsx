@@ -66,7 +66,7 @@ const statusLine = (r: MyRegistration) =>
     ? { label: "Menunggu pembayaran", tone: "text-amber-700", icon: ClockIcon }
     : r.status === "pending_membership"
       ? { label: "Menunggu validasi keanggotaan", tone: "text-amber-700", icon: ClockIcon }
-      : { label: r.isMember ? "Diterima – anggota" : "Diterima – lunas", tone: "text-emerald-700", icon: CheckCircleIcon };
+      : { label: r.isMember ? "Diterima – anggota" : r.paymentStatus === "free" ? "Diterima – gratis" : "Diterima – lunas", tone: "text-emerald-700", icon: CheckCircleIcon };
 
 export function ManageRegistration({
   registration: r,
@@ -103,7 +103,7 @@ export function ManageRegistration({
           value={<span className={status.tone}>{status.label}</span>}
           sub={`Didaftarkan ${formatDateTime(r.createdAt)}`}
         />
-        <EventDetailRow icon={UsersIcon} label="Jumlah peserta" value={`${participants.length} orang`} sub={r.isMember ? "Gratis untuk anggota" : formatEuro(r.amountCents)} />
+        <EventDetailRow icon={UsersIcon} label="Jumlah peserta" value={`${participants.length} orang`} sub={r.isMember ? "Gratis untuk anggota" : r.paymentStatus === "free" ? "Gratis" : formatEuro(r.amountCents)} />
         <EventDetailRow icon={EnvelopeIcon} label="Email" value={<span className="break-all">{r.email}</span>} sub="Tidak dapat diubah sendiri" />
         <EventDetailRow icon={PhoneIcon} label="WhatsApp" value={r.whatsapp || "–"} />
       </dl>

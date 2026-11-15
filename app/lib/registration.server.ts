@@ -7,13 +7,14 @@ import {
   type RegistrationRow,
 } from "./db.server";
 import { outboxStatement } from "./email/send.server";
-import { newId } from "./ids";
+import { newId, newTicketToken } from "./ids";
 import { MEDIA_NOTICE_VERSION } from "./rules";
 import type { RegistrationInput } from "./validation";
 
 export type RegisterResult =
   | { kind: "pending_membership"; registrationId: string; people: number }
-  | { kind: "accepted"; registrationId: string; people: number }
+  /** `member` false = a non-member registering while the price is 0 (accepted at once, QR email follows via the outbox). */
+  | { kind: "accepted"; registrationId: string; people: number; member: boolean }
   | {
       kind: "pending_payment";
       registrationId: string;
@@ -48,7 +49,7 @@ function resultFromRow(row: RegistrationRow, remaining = 0): RegisterResult {
     case "pending_membership":
       return { kind: "pending_membership", registrationId: row.id, people: row.people };
     case "accepted":
-      return { kind: "accepted", registrationId: row.id, people: row.people };
+      return { kind: "accepted", registrationId: row.id, people: row.people, member: row.is_member === 1 };
     case "pending_payment":
       return {
         kind: "pending_payment",
@@ -104,14 +105,20 @@ export async function registerOnline(
   const people = input.participants.length;
   const seats = seatCount(input.participants); // only remaja + dewasa take a quota seat
   const registrationId = newId();
-  const amountCents = isMember ? 0 : payingCount(input.participants) * event.price_non_member_cents;
-  const payDeadline = isMember
-    ? null
-    : new Date(now.getTime() + event.pay_window_min * 60_000).toISOString();
+  // Price 0 (free event): a non-member is accepted at once, with ticket codes, and there is no payment step at all.
+  // Members still wait for validation. The QR email is only queued here; the cron sweeper renders and sends it.
+  const freeNonMember = !isMember && event.price_non_member_cents === 0;
+  const needsPayment = !isMember && !freeNonMember;
+  const amountCents = needsPayment ? payingCount(input.participants) * event.price_non_member_cents : 0;
+  const payDeadline = needsPayment
+    ? new Date(now.getTime() + event.pay_window_min * 60_000).toISOString()
+    : null;
   const quotaColumn = isMember ? "quota_member" : "quota_non_member";
+  const regStatus = isMember ? "pending_membership" : freeNonMember ? "accepted" : "pending_payment";
+  const participantStatus = isMember ? "pending_membership" : freeNonMember ? "accepted" : "pending_payment";
 
   const statements: D1PreparedStatement[] = [];
-  if (!isMember) {
+  if (needsPayment) {
     statements.push(
       db.prepare("UPDATE events SET payment_counter = payment_counter + 1 WHERE id = ?").bind(event.id),
     );
@@ -125,7 +132,7 @@ export async function registerOnline(
            status, payment_status, payment_code, amount_cents, pay_deadline,
            consent_at, privacy_version, media_consent_at, media_notice_version, marketing_opt_in, idempotency_key)
          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, ?,
-           ${isMember ? "NULL" : "(SELECT payment_prefix || printf('%06d', payment_counter) FROM events WHERE id = ?)"},
+           ${!needsPayment ? "NULL" : "(SELECT payment_prefix || printf('%06d', payment_counter) FROM events WHERE id = ?)"},
            ?, ?, ?, ?, ?, ?, ?, ?
          WHERE (${SEATS_USED_SQL}) + ? <= (SELECT ${quotaColumn} FROM events WHERE id = ?)`,
       )
@@ -139,9 +146,9 @@ export async function registerOnline(
         input.whatsapp,
         people,
         seats,
-        isMember ? "pending_membership" : "pending_payment",
-        isMember ? "free" : "pending",
-        ...(isMember ? [] : [event.id]),
+        regStatus,
+        needsPayment ? "pending" : "free",
+        ...(needsPayment ? [event.id] : []),
         amountCents,
         payDeadline,
         nowIso,
@@ -173,16 +180,18 @@ export async function registerOnline(
           p.name,
           p.ageGroup,
           p.gender,
-          // Members get their ticket codes only once an admin has validated the membership (acceptMember).
-          isMember ? "pending_membership" : "pending_payment",
-          null,
+          // Members get their ticket codes only once an admin has validated the membership (activateMember).
+          participantStatus,
+          freeNonMember ? newTicketToken() : null,
           registrationId,
         ),
     );
   });
 
   // Outbox: the email is recorded in the SAME transaction as the registration, so it cannot be lost.
-  statements.push(outboxStatement(db, registrationId, isMember ? "membership_pending" : "payment_instructions", nowIso));
+  statements.push(
+    outboxStatement(db, registrationId, isMember ? "membership_pending" : freeNonMember ? "confirmation" : "payment_instructions", nowIso),
+  );
 
   let results: D1Result[];
   try {
@@ -201,10 +210,11 @@ export async function registerOnline(
     throw err;
   }
 
-  const inserted = (results[isMember ? 0 : 1].meta.changes ?? 0) === 1;
+  const inserted = (results[needsPayment ? 1 : 0].meta.changes ?? 0) === 1;
 
   if (inserted) {
     if (isMember) return { kind: "pending_membership", registrationId, people };
+    if (freeNonMember) return { kind: "accepted", registrationId, people, member: false };
     const row = await db
       .prepare("SELECT payment_code FROM registrations WHERE id = ?")
       .bind(registrationId)

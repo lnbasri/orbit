@@ -20,9 +20,6 @@ import {
 
 export { escapeHtml };
 
-/** Voluntary infaq payment request (ING), shown as a button in the confirmation email. */
-const INFAQ_PAYMENT_URL = "https://www.ing.nl/payreq/m/?trxid=pGFVuaic76PdDsKuFNeHD4wkJ5edNwsY";
-
 export interface EventInfo {
   title: string;
   speaker: string | null;
@@ -32,6 +29,8 @@ export interface EventInfo {
   location_name?: string | null;
   location_address?: string | null;
   location_map_url?: string | null;
+  /** Voluntary infaq payment link; empty = the infaq block is left out. */
+  infaq_url?: string | null;
   max_family: number;
   price_non_member_cents: number;
   pay_window_min: number;
@@ -206,17 +205,7 @@ export function confirmationEmail(
       "Tunjukkan QR Code kepada panitia saat check-in di lokasi acara.",
       "QR Code hanya berisi kode tiket acak, bukan data pribadi Anda.",
     ]) +
-    heading("Dukungan Infaq untuk Dakwah dan Kajian") +
-    para(
-      "Kami mengajak Bapak/Ibu dan Saudara/i untuk turut mendukung kegiatan dakwah dan kajian Islam melalui infaq sukarela. Berapa pun nilainya, insyaAllah sangat berarti bagi keberlangsungan kegiatan kajian PPME Den Haag.",
-    ) +
-    para(
-      "<em>“Jagalah diri kalian dari api neraka walaupun hanya dengan (bersedekah) separuh kurma.”</em> <strong>(HR. Bukhari dan Muslim)</strong>",
-    ) +
-    buttonLink("Berikan Infaq", INFAQ_PAYMENT_URL) +
-    para(
-      "<strong>Infaq ini sepenuhnya sukarela, tidak wajib dan tidak menjadi syarat pendaftaran maupun keikutsertaan dalam kajian.</strong>",
-    ) +
+    infaqSection(event.infaq_url) +
     rulesSection(event) +
     para("Terima kasih atas partisipasi Anda. Sampai bertemu di acara.", "8px 0 0 0");
 
@@ -232,6 +221,24 @@ export function confirmationEmail(
     contact,
   });
   return { subject, html };
+}
+
+/** Voluntary infaq block with the payment button. Left out when the event has no infaq link. */
+function infaqSection(url: string | null | undefined) {
+  if (!url) return "";
+  return (
+    heading("Dukungan Infaq untuk Dakwah dan Kajian") +
+    para(
+      "Kami mengajak Bapak/Ibu dan Saudara/i untuk turut mendukung kegiatan dakwah dan kajian Islam melalui infaq sukarela. Berapa pun nilainya, insyaAllah sangat berarti bagi keberlangsungan kegiatan kajian PPME Den Haag.",
+    ) +
+    para(
+      "<em>“Jagalah diri kalian dari api neraka walaupun hanya dengan (bersedekah) separuh kurma.”</em> <strong>(HR. Bukhari dan Muslim)</strong>",
+    ) +
+    buttonLink("Berikan Infaq", url) +
+    para(
+      "<strong>Infaq ini sepenuhnya sukarela, tidak wajib dan tidak menjadi syarat pendaftaran maupun keikutsertaan dalam kajian.</strong>",
+    )
+  );
 }
 
 /** "Simpan di kalender": web links plus a pointer to the attached .ics file. Left out when no links are given. */

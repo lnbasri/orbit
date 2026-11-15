@@ -121,8 +121,12 @@ export function HeaderSection({ event }: { event: PublicEvent }) {
           <EventDetailRow
             icon={BanknotesIcon}
             label="Biaya"
-            value="Anggota gratis"
-            sub={`Non-anggota ${formatEuro(event.priceCents)} per orang (remaja & dewasa)`}
+            value={event.priceCents === 0 ? "Gratis" : "Anggota gratis"}
+            sub={
+              event.priceCents === 0
+                ? "Untuk anggota maupun non-anggota"
+                : `Non-anggota ${formatEuro(event.priceCents)} per orang (remaja & dewasa)`
+            }
           />
         )}
         {event.locationName || event.locationAddress ? (
