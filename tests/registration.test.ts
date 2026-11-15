@@ -6,8 +6,9 @@ import { deliverEmail, type Attachment } from "../app/lib/email/send.server";
 import { TICKET_TOKEN_PATTERN } from "../app/lib/ids";
 import { runDeadlineJob } from "../app/lib/jobs.server";
 import { confirmPayment, deleteRegistration, rejectMembership, setMembershipVerified } from "../app/lib/payments.server";
-import { updateEventLocation } from "../app/lib/events.server";
+import { updateEventLocation, updateInfaqUrl } from "../app/lib/events.server";
 import { quotaSummary, registerOnline } from "../app/lib/registration.server";
+import { selfEditState } from "../app/lib/self-service.server";
 import { registrationSchema } from "../app/lib/validation";
 import { T0, decodeQrPng, emailCfg, hours, input, resetDb, startDb } from "./helpers";
 
@@ -420,5 +421,72 @@ describe("event location (admin)", () => {
     expect((await updateEventLocation(db, "admin@test", event.id, "", "", "")).ok).toBe(true);
     expect((await db.prepare("SELECT location_name FROM events").first<{ location_name: string | null }>())!.location_name).toBeNull();
     await db.prepare("UPDATE events SET location_name='Masjid Al Hikmah', location_address='Medlerstraat 4, 2531 HA Den Haag', location_map_url='https://maps.app.goo.gl/7nLnjw15QhfiC6tA7'").run();
+  });
+});
+
+describe("free event (non-member price 0)", () => {
+  beforeEach(async () => {
+    await db.prepare("UPDATE events SET price_non_member_cents = 0").run();
+    event = (await db.prepare("SELECT * FROM events").first<EventRow>())!;
+  });
+
+  it("accepts a non-member at once with ticket codes, no payment data, and queues only the QR email", async () => {
+    const counterBefore = (await db.prepare("SELECT payment_counter c FROM events").first<{ c: number }>())!.c;
+    const res = await registerOnline(db, event, input({ people: 3, membership: "Tidak" }), opts());
+    expect(res).toMatchObject({ kind: "accepted", member: false });
+    if (res.kind !== "accepted") return;
+
+    expect(await getRegistration(db, res.registrationId)).toMatchObject({
+      status: "accepted",
+      payment_status: "free",
+      amount_cents: 0,
+      payment_code: null,
+      pay_deadline: null,
+    });
+    const people = await getParticipants(db, res.registrationId);
+    expect(people.every((p) => p.status === "accepted" && TICKET_TOKEN_PATTERN.test(p.qr_token ?? ""))).toBe(true);
+    const kinds = await db.prepare("SELECT kind, status FROM email_log WHERE registration_id = ?").bind(res.registrationId).all<{ kind: string; status: string }>();
+    expect(kinds.results).toEqual([{ kind: "confirmation", status: "pending" }]);
+    expect((await db.prepare("SELECT payment_counter c FROM events").first<{ c: number }>())!.c).toBe(counterBefore);
+    // it still holds quota seats (non-member group)
+    expect((await quotaSummary(db, event, T0)).nonMember.used).toBe(3); // dewasa + remaja + dewasa
+  });
+
+  it("the cron job (not the request) renders and sends the QR email", async () => {
+    const res = await registerOnline(db, event, input({ people: 2, membership: "Tidak" }), opts());
+    if (res.kind !== "accepted") throw new Error(res.kind);
+    expect((await db.prepare("SELECT COUNT(*) n FROM dev_outbox WHERE registration_id = ?").bind(res.registrationId).first<{ n: number }>())!.n).toBe(0);
+    await runDeadlineJob(db, emailCfg, new Date(T0.getTime() + 120_000));
+    const mail = await db.prepare("SELECT html, attachments_json FROM dev_outbox WHERE registration_id = ?").bind(res.registrationId).first<{ html: string; attachments_json: string }>();
+    expect((JSON.parse(mail!.attachments_json) as Attachment[]).filter((a) => a.contentId)).toHaveLength(2);
+    expect(mail!.html).toContain("Pendaftaran Anda telah DITERIMA");
+    expect(mail!.html).not.toContain("Keanggotaan Anda telah divalidasi");
+    expect((await db.prepare("SELECT status FROM email_log WHERE registration_id = ?").bind(res.registrationId).first<{ status: string }>())!.status).toBe("sent");
+  });
+
+  it("members still wait for validation, and the registration stays editable by its owner", async () => {
+    const member = await registerOnline(db, event, input({ people: 1, membership: "Ya" }), opts());
+    expect(member.kind).toBe("pending_membership");
+    const res = await registerOnline(db, event, input({ people: 1, membership: "Tidak" }), opts());
+    if (res.kind !== "accepted") throw new Error(res.kind);
+    const reg = (await getRegistration(db, res.registrationId))!;
+    expect(selfEditState(reg, event, T0, { ignoreWindow: true }).editable).toBe(true);
+  });
+});
+
+describe("event infaq link (admin)", () => {
+  const SEEDED = "https://www.ing.nl/payreq/m/X9CLufQNF0vMV8TUwk4MRhKo2ZfMzfNC";
+  it("is seeded, validates https, can be cleared and is audited", async () => {
+    expect(event.infaq_url).toBe(SEEDED);
+    expect(await updateInfaqUrl(db, "admin@test", event.id, SEEDED)).toMatchObject({ ok: true, message: "Tautan infaq tidak berubah." });
+    expect((await updateInfaqUrl(db, "admin@test", event.id, "http://insecure.example/x")).ok).toBe(false);
+    expect((await updateInfaqUrl(db, "admin@test", event.id, "javascript:alert(1)")).ok).toBe(false);
+    expect((await updateInfaqUrl(db, "admin@test", event.id, "https://x.example/" + "a".repeat(300))).ok).toBe(false);
+    expect(await updateInfaqUrl(db, "admin@test", event.id, " https://www.ing.nl/payreq/m/NEW ")).toMatchObject({ ok: true, message: "Tautan infaq disimpan." });
+    expect((await db.prepare("SELECT infaq_url FROM events").first<{ infaq_url: string }>())!.infaq_url).toBe("https://www.ing.nl/payreq/m/NEW");
+    expect((await db.prepare("SELECT COUNT(*) n FROM audit_log WHERE action = 'event.infaq'").first<{ n: number }>())!.n).toBe(1);
+    expect((await updateInfaqUrl(db, "admin@test", event.id, "")).ok).toBe(true);
+    expect((await db.prepare("SELECT infaq_url FROM events").first<{ infaq_url: string | null }>())!.infaq_url).toBeNull();
+    await db.prepare("UPDATE events SET infaq_url = ?").bind(SEEDED).run();
   });
 });

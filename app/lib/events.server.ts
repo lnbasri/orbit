@@ -103,7 +103,8 @@ export function parseEuroToCents(v: string): number | null {
 }
 
 /**
- * Admin: set the non-member price per person. Only affects registrations made afterwards; existing
+ * Admin: set the non-member price per person (0 = free: non-members are then accepted at once and get their QR code
+ * without a payment step, see registerOnline). Only affects registrations made afterwards; existing
  * registrations keep their stored amount_cents (a pending one is recalculated only if the registrant edits it).
  */
 export async function updateEventPrice(
@@ -116,8 +117,8 @@ export async function updateEventPrice(
   const event = await getEventById(db, eventId);
   if (!event) return { ok: false, message: "Acara tidak ditemukan." };
   const cents = parseEuroToCents(priceInput);
-  if (cents === null || cents <= 0) {
-    return { ok: false, message: "Biaya tidak valid. Isi jumlah euro lebih dari 0, misalnya 10 atau 12,50." };
+  if (cents === null || cents < 0) {
+    return { ok: false, message: "Biaya tidak valid. Isi jumlah euro, misalnya 10 atau 12,50 (isi 0 bila gratis)." };
   }
   if (cents === event.price_non_member_cents) return { ok: true, message: "Biaya tidak berubah." };
 
@@ -227,6 +228,37 @@ export async function updateEventLocation(
     ),
   ]);
   return { ok: true, message: "Lokasi disimpan." };
+}
+
+/**
+ * Admin: the voluntary infaq payment link (https only). Used for the "Berikan Infaq" button in confirmation emails
+ * sent from now on; empty = the infaq block is left out. Emails already sent are not touched.
+ */
+export async function updateInfaqUrl(
+  db: D1Database,
+  actor: string,
+  eventId: number,
+  urlInput: string,
+  now = new Date(),
+): Promise<EventResult> {
+  const event = await getEventById(db, eventId);
+  if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+  const url = urlInput.trim();
+  if (url) {
+    let ok = url.length <= 300;
+    try {
+      ok = ok && new URL(url).protocol === "https:";
+    } catch {
+      ok = false;
+    }
+    if (!ok) return { ok: false, message: "Tautan infaq harus berupa alamat https:// yang valid (maksimal 300 karakter)." };
+  }
+  if ((url || null) === event.infaq_url) return { ok: true, message: "Tautan infaq tidak berubah." };
+  await db.batch([
+    db.prepare("UPDATE events SET infaq_url = ? WHERE id = ?").bind(url || null, eventId),
+    auditStatement(db, actor, "event.infaq", event.slug, { from: event.infaq_url, to: url || null }, now.toISOString()),
+  ]);
+  return { ok: true, message: url ? "Tautan infaq disimpan." : "Tautan infaq dihapus (blok infaq tidak tampil di email)." };
 }
 
 /**

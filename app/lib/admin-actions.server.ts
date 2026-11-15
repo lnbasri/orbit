@@ -14,7 +14,7 @@ import {
   setScannerRole,
   updateCheckinGate,
 } from "./scanners.server";
-import { updateEventDetails, updateEventLocation, updateEventTimes, updateEventPrice, updateSelfAdd, updateQuotas, updateRegistrationWindow } from "./events.server";
+import { updateEventDetails, updateEventLocation, updateInfaqUrl, updateEventTimes, updateEventPrice, updateSelfAdd, updateQuotas, updateRegistrationWindow } from "./events.server";
 import { emailConfig, type AppEnv } from "./config.server";
 import { audit, getEventBySlug } from "./db.server";
 import { deliverEmail, type EmailKind } from "./email/send.server";
@@ -150,6 +150,11 @@ export async function handleAdminIntent(env: AppEnv, actor: string, form: FormDa
         String(form.get("locationAddress") ?? ""),
         String(form.get("locationMapUrl") ?? ""),
       );
+    }
+    case "save-event-infaq": {
+      const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");
+      if (!event) return { ok: false, message: "Acara tidak ditemukan." };
+      return updateInfaqUrl(env.DB, actor, event.id, String(form.get("infaqUrl") ?? ""));
     }
     case "save-event-price": {
       const event = await getEventBySlug(env.DB, env.DEFAULT_EVENT_SLUG ?? "");

@@ -50,6 +50,7 @@ export async function loader({ params }: Route.LoaderArgs) {
       endsAt: event.ends_at,
       registrationClosesAt: event.registration_closes_at,
       maxFamily: event.max_family,
+      infaqUrl: event.infaq_url,
       priceCents: event.price_non_member_cents,
       payWindowHours: Math.round(event.pay_window_min / 60),
     },
@@ -63,7 +64,7 @@ export async function loader({ params }: Route.LoaderArgs) {
 type ActionData =
   | { ok: false; errors: FieldErrors; message: string; manageLink?: boolean }
   | { ok: true; kind: "pending_membership"; people: number; email: string }
-  | { ok: true; kind: "accepted"; people: number; email: string }
+  | { ok: true; kind: "accepted"; people: number; email: string; member: boolean }
   | {
       ok: true;
       kind: "pending_payment";
@@ -110,7 +111,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
   }
 
-  if (parsed.data.membership === "Tidak" && !bankConfigured(appEnv)) {
+  if (parsed.data.membership === "Tidak" && event.price_non_member_cents > 0 && !bankConfigured(appEnv)) {
     console.error("BANK_ACCOUNT_NAME / BANK_IBAN are not configured: refusing a non-member registration");
     return data<ActionData>(
       {
@@ -131,8 +132,10 @@ export async function action({ request, params }: Route.ActionArgs) {
       waitUntil(deliverEmail(appEnv.DB, cfg, result.registrationId, "membership_pending"));
       return data<ActionData>({ ok: true, kind: "pending_membership", people: result.people, email: parsed.data.email });
     case "accepted":
-      // Only reachable by replaying the idempotency key of a registration made before validation came first.
-      return data<ActionData>({ ok: true, kind: "accepted", people: result.people, email: parsed.data.email });
+      // Free event (price 0): accepted at once. The QR email is already in the outbox and is rendered + sent by the
+      // 5-minute cron job, NOT here, so the HTTP request never pays the QR rendering CPU. (Also reached by replaying
+      // the idempotency key of an earlier registration.)
+      return data<ActionData>({ ok: true, kind: "accepted", people: result.people, email: parsed.data.email, member: result.member });
     case "pending_payment":
       waitUntil(deliverEmail(appEnv.DB, cfg, result.registrationId, "payment_instructions"));
       return data<ActionData>({
@@ -179,7 +182,12 @@ export default function Register({ loaderData, actionData }: Route.ComponentProp
   if (result?.ok) {
     return (
       <PageShell>
-        <SuccessPanel result={result} eventTitle={event.title} manageUrl={`/e/${event.slug}/pendaftaran-saya`} />
+        <SuccessPanel
+          result={result}
+          eventTitle={event.title}
+          manageUrl={`/e/${event.slug}/pendaftaran-saya`}
+          infaqUrl={event.infaqUrl}
+        />
       </PageShell>
     );
   }

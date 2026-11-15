@@ -169,13 +169,18 @@ export async function action({ request, params, url }: Route.ActionArgs) {
     if (!res.changed) {
       return data<ActionData>({ step: "save", result: { ok: true, message: "Tidak ada perubahan untuk disimpan." } });
     }
-    if (res.email) waitUntil(deliverEmail(env.DB, emailConfig(env), res.registrationId, res.email));
+    // The QR (confirmation) email is NOT rendered in this public request: it is already re-queued in the outbox by the
+    // edit and the 5-minute cron sends it. The light emails (no QR images) still go out right away.
+    const viaCron = res.email === "confirmation";
+    if (res.email && !viaCron) waitUntil(deliverEmail(env.DB, emailConfig(env), res.registrationId, res.email));
     return data<ActionData>({
       step: "save",
       result: {
         ok: true,
         message: res.email
-          ? `Perubahan disimpan. Email dengan data terbaru dikirim ke ${session.email}.`
+          ? viaCron
+            ? `Perubahan disimpan. Email dengan QR Code terbaru dikirim ke ${session.email} dalam beberapa menit (maksimal sekitar 10 menit).`
+            : `Perubahan disimpan. Email dengan data terbaru dikirim ke ${session.email}.`
           : "Perubahan disimpan.",
       },
     });

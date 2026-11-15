@@ -183,7 +183,7 @@ export function RegistrationForm({
                 {
                   value: "Tidak",
                   label: "Bukan anggota",
-                  hint: quotaFull.nonMember ? "Kuota penuh" : `${formatEuro(event.priceCents)} per orang (remaja & dewasa)`,
+                  hint: quotaFull.nonMember ? "Kuota penuh" : event.priceCents === 0 ? "Gratis" : `${formatEuro(event.priceCents)} per orang (remaja & dewasa)`,
                   disabled: quotaFull.nonMember,
                 },
               ]}

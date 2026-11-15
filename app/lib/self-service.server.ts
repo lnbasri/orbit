@@ -7,7 +7,7 @@ import type { SelfEditInput } from "./validation";
 /**
  * "Pendaftaran saya": a registrant (signed in per event with an email code) views their ACTIVE registration and,
  * while allowed, edits it themselves (decision 12 Nov 2026):
- *  - members (free): editable until registration closes / the event starts, both while the membership still has to be
+ *  - free registrations (members, and non-members registered while the price was 0): editable until registration closes / the event starts, both while the membership still has to be
  *    validated by the committee ('pending_membership') and after validation (accepted, QR codes issued);
  *  - non-members: editable while the payment is pending and the deadline has not passed; once the committee confirms
  *    the payment it is view-only and changes go by email to the committee (event@ppmedenhaag.nl);
@@ -42,7 +42,8 @@ export function selfEditState(
   const iso = now.toISOString();
   if (reg.source !== "online") return { editable: false, reason: "manual" };
   if (reg.status === "accepted" && reg.payment_status === "paid") return { editable: false, reason: "paid" };
-  const member = (reg.status === "accepted" || reg.status === "pending_membership") && reg.is_member === 1 && reg.payment_status === "free";
+  // payment_status 'free' = no payment involved: members, and non-members registered while the price was 0.
+  const member = (reg.status === "accepted" || reg.status === "pending_membership") && reg.payment_status === "free";
   const pending = reg.status === "pending_payment" && reg.payment_status === "pending";
   if (!member && !pending) return { editable: false, reason: "closed" };
   if (pending && (!reg.pay_deadline || reg.pay_deadline <= iso)) return { editable: false, reason: "deadline" };
@@ -68,7 +69,7 @@ export async function getActiveRegistrationByEmail(db: D1Database, eventId: numb
 
 /** Same rule as selfEditState, as SQL on the registrations row (binds: now). */
 const EDITABLE_SQL = `source = 'online' AND (
-    (status IN ('accepted', 'pending_membership') AND is_member = 1 AND payment_status = 'free')
+    (status IN ('accepted', 'pending_membership') AND payment_status = 'free')
     OR (status = 'pending_payment' AND payment_status = 'pending' AND pay_deadline > ?))`;
 
 /** Event still open for edits (binds: now, now + 1 hour: the event-day lock). */
@@ -131,7 +132,7 @@ export async function updateOwnRegistration(
   const added = input.participants.length - keptIds.length;
   if (added > 0 && !event.self_add_allowed) return { ok: false, reason: "add_disabled", message: ADD_DISABLED };
   const people = input.participants.length;
-  const amountCents = reg.is_member ? 0 : payingCount(input.participants) * event.price_non_member_cents;
+  const amountCents = reg.is_member || reg.payment_status === "free" ? 0 : payingCount(input.participants) * event.price_non_member_cents;
   const seats = seatCount(input.participants);
 
   const participantsChanged =
@@ -263,7 +264,7 @@ export async function updateOwnRegistration(
 
   const detail = {
     people: { from: current.length, to: people },
-    ...(isMember ? {} : { amountCents: { from: reg.amount_cents, to: amountCents } }),
+    ...(isMember || reg.payment_status === "free" ? {} : { amountCents: { from: reg.amount_cents, to: amountCents } }),
     fields: [nameChanged && "registrant_name", whatsappChanged && "whatsapp", participantsChanged && "participants"].filter(
       Boolean,
     ),

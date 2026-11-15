@@ -5,6 +5,7 @@ import {
   ClockIcon,
   EnvelopeIcon,
   HashtagIcon,
+  HeartIcon,
   IdentificationIcon,
   PencilSquareIcon,
   QrCodeIcon,
@@ -19,7 +20,7 @@ import { EventDetailRow } from "./EventDetailRow";
 
 export type SuccessResult =
   | { ok: true; kind: "pending_membership"; people: number; email: string }
-  | { ok: true; kind: "accepted"; people: number; email: string }
+  | { ok: true; kind: "accepted"; people: number; email: string; member: boolean }
   | {
       ok: true;
       kind: "pending_payment";
@@ -36,10 +37,13 @@ export function SuccessPanel({
   result,
   eventTitle,
   manageUrl,
+  infaqUrl,
 }: {
   result: SuccessResult;
   eventTitle: string;
   manageUrl: string;
+  /** Voluntary infaq payment link of the event; the infaq block is left out when empty. */
+  infaqUrl?: string | null;
 }) {
   const accepted = result.kind === "accepted";
   const membership = result.kind === "pending_membership";
@@ -94,7 +98,12 @@ export function SuccessPanel({
       ) : result.kind === "accepted" ? (
         <>
           <dl className="mt-8 grid gap-px border-y border-slate-200/80 bg-slate-200/80 sm:grid-cols-2">
-            <EventDetailRow icon={UsersIcon} label="Jumlah peserta" value={`${result.people} orang`} sub="Gratis untuk anggota" />
+            <EventDetailRow
+              icon={UsersIcon}
+              label="Jumlah peserta"
+              value={`${result.people} orang`}
+              sub={result.member ? "Gratis untuk anggota" : "Gratis"}
+            />
             <EventDetailRow
               icon={EnvelopeIcon}
               label="Dikirim ke"
@@ -105,9 +114,9 @@ export function SuccessPanel({
           <div className="px-5 py-8 sm:px-8 lg:px-10">
             <Callout tone="success" icon={QrCodeIcon} title="QR Code dalam perjalanan">
               <p>
-                Email konfirmasi beserta QR Code setiap peserta dikirim ke{" "}
-                <span className="font-semibold">{result.email}</span>. Tunjukkan QR Code saat check-in; setiap kode hanya
-                dapat digunakan satu kali.
+                Pendaftaran Anda sudah selesai, tidak ada pembayaran yang diperlukan. Email konfirmasi beserta QR Code
+                setiap peserta dikirim ke <span className="font-semibold">{result.email}</span> dalam beberapa menit
+                (maksimal sekitar 10 menit). Tunjukkan QR Code saat check-in; setiap kode hanya dapat digunakan satu kali.
               </p>
             </Callout>
           </div>
@@ -153,6 +162,7 @@ export function SuccessPanel({
           </div>
         </>
       )}
+      {infaqUrl ? <InfaqSection url={infaqUrl} /> : null}
       <div className="border-t border-slate-200/80 bg-slate-50/70 px-5 py-5 sm:px-8 lg:px-10">
         <p className="flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
           <span>
@@ -167,6 +177,33 @@ export function SuccessPanel({
         </p>
       </div>
     </>
+  );
+}
+
+/** Voluntary infaq block (same wording as the confirmation email). Opens the ING payment request in a new tab. */
+function InfaqSection({ url }: { url: string }) {
+  return (
+    <div className="border-t border-slate-200/80 px-5 py-8 sm:px-8 lg:px-10">
+      <Callout tone="neutral" icon={HeartIcon} title="Dukungan Infaq untuk Dakwah dan Kajian">
+        <p>
+          Kami mengajak Bapak/Ibu dan Saudara/i untuk turut mendukung kegiatan dakwah dan kajian Islam melalui infaq sukarela.
+          Berapa pun nilainya, insyaAllah sangat berarti bagi keberlangsungan kegiatan kajian PPME Den Haag.
+        </p>
+        <p className="mt-3 italic">
+          “Jagalah diri kalian dari api neraka walaupun hanya dengan (bersedekah) separuh kurma.”{" "}
+          <span className="font-semibold not-italic">(HR. Bukhari dan Muslim)</span>
+        </p>
+        <p className="mt-4">
+          <a href={url} target="_blank" rel="noopener noreferrer" className={buttonClass("primary", "md")}>
+            <HeartIcon className="size-4" aria-hidden="true" />
+            Berikan Infaq
+          </a>
+        </p>
+        <p className="mt-3 font-semibold">
+          Infaq ini sepenuhnya sukarela, tidak wajib dan tidak menjadi syarat pendaftaran maupun keikutsertaan dalam kajian.
+        </p>
+      </Callout>
+    </div>
   );
 }
 

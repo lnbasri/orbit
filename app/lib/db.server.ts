@@ -24,6 +24,8 @@ export interface EventRow {
   location_name: string | null;
   location_address: string | null;
   location_map_url: string | null;
+  /** Voluntary infaq payment link (https). NULL = no infaq block in the confirmation email. */
+  infaq_url: string | null;
   /** 1 = registrants may add NEW participants in "Pendaftaran Saya" (default 0, quota control). */
   self_add_allowed: number;
   /** Check-in kill switch (1 = scanners may admit people). */
