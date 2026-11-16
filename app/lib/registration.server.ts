@@ -94,10 +94,10 @@ export async function registerOnline(
   if (!opts.ignoreWindow) {
     const closed = registrationWindowError(event, now);
     if (closed) return { kind: "closed", reason: closed };
-  }
-  if (input.membership === "Tidak") {
-    const nonMemberClosed = nonMemberOpeningError(event, now);
-    if (nonMemberClosed) return { kind: "closed", reason: nonMemberClosed };
+    if (input.membership === "Tidak") {
+      const nonMemberClosed = nonMemberOpeningError(event, now);
+      if (nonMemberClosed) return { kind: "closed", reason: nonMemberClosed };
+    }
   }
   if (input.participants.length > event.max_family) {
     return { kind: "closed", reason: `Maksimal ${event.max_family} peserta per pendaftaran.` };

@@ -66,16 +66,20 @@ describe("registration window", () => {
 
   it("opens non-member registration at its scheduled time without blocking members", async () => {
     const event = await getEventById(db, 1);
-    const ev = { ...event!, non_member_opens_at: "2026-11-23T23:00:00.000Z", price_non_member_cents: 500 };
+    const ev = { ...event!, non_member_opens_at: "2026-11-23T23:00:00.000Z", price_non_member_cents: 500, registration_opens_at: null, registration_closes_at: null };
     const before = at("2026-11-23T22:59:59.000Z");
     const opensAt = at("2026-11-23T23:00:00.000Z");
 
     expect(nonMemberOpeningError(ev, before)).toMatch(/belum dibuka/);
-    expect((await registerOnline(db, ev, input({ membership: "Tidak" }), { now: before, ignoreWindow: true })).kind).toBe("closed");
-    expect((await registerOnline(db, ev, input({ membership: "Ya" }), { now: before, ignoreWindow: true })).kind).toBe(
+    expect((await registerOnline(db, ev, input({ membership: "Tidak" }), { now: before })).kind).toBe("closed");
+    expect((await registerOnline(db, ev, input({ membership: "Ya" }), { now: before })).kind).toBe(
       "pending_membership",
     );
-    expect((await registerOnline(db, ev, input({ membership: "Tidak" }), { now: opensAt, ignoreWindow: true })).kind).toBe(
+    expect((await registerOnline(db, ev, input({ membership: "Tidak" }), { now: opensAt })).kind).toBe(
+      "pending_payment",
+    );
+    // local dev ignores the whole window, including the non-member opening time
+    expect((await registerOnline(db, ev, input({ membership: "Tidak", email: "dev@x.nl" }), { now: before, ignoreWindow: true })).kind).toBe(
       "pending_payment",
     );
   });

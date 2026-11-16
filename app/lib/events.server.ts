@@ -55,8 +55,10 @@ export async function updateRegistrationWindow(
       "event.registration_window",
       event.slug,
       {
-        from: [event.registration_opens_at, event.non_member_opens_at, event.registration_closes_at],
-        to: [opens, nonMemberOpens, closes],
+        // from/to keep the original [opens, closes] shape of older rows; the non-member time is added alongside.
+        from: [event.registration_opens_at, event.registration_closes_at],
+        to: [opens, closes],
+        nonMember: [event.non_member_opens_at, nonMemberOpens],
       },
       now.toISOString(),
     ),

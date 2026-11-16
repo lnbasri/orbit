@@ -42,6 +42,7 @@ export function RegistrationForm({
   siteKey,
   quotaFull,
   nonMemberOpen: initiallyNonMemberOpen,
+  serverNow,
   failure,
   submitting,
 }: {
@@ -49,6 +50,7 @@ export function RegistrationForm({
   siteKey: string;
   quotaFull: { member: boolean; nonMember: boolean };
   nonMemberOpen: boolean;
+  serverNow: string;
   failure?: FormFailure;
   submitting: boolean;
 }) {
@@ -73,10 +75,13 @@ export function RegistrationForm({
 
     const opensAt = Date.parse(event.nonMemberOpensAt);
     if (Number.isNaN(opensAt)) return;
+    // Use the server's clock (offset measured at load), so a wrong phone clock cannot open the option early or late.
+    const offset = Date.parse(serverNow) - Date.now();
+    const now = () => Date.now() + (Number.isNaN(offset) ? 0 : offset);
 
     let timer: number | undefined;
     const updateOpenState = () => {
-      const delay = opensAt - Date.now();
+      const delay = opensAt - now();
       if (delay <= 0) {
         setNonMemberOpen(true);
         return;
@@ -87,7 +92,7 @@ export function RegistrationForm({
     return () => {
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [event.nonMemberOpensAt, initiallyNonMemberOpen]);
+  }, [event.nonMemberOpensAt, initiallyNonMemberOpen, serverNow]);
   const [firstNameTouched, setFirstNameTouched] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState("");
   const [review, setReview] = useState<ReviewSummary | null>(null);
