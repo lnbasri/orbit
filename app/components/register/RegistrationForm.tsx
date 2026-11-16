@@ -13,7 +13,7 @@ import {
 import { Form, Link } from "react-router";
 
 import { Callout, buttonClass } from "~/components/ui";
-import { formatEuro } from "~/lib/format";
+import { formatDateTime, formatEuro } from "~/lib/format";
 import { validateRegistrationDraft, type FieldErrors } from "~/lib/validation";
 import { CheckField, ChoiceField, CountCombobox, TextInputField } from "./controls";
 import type { PublicEvent } from "./HeaderSection";
@@ -41,12 +41,14 @@ export function RegistrationForm({
   event,
   siteKey,
   quotaFull,
+  nonMemberOpen: initiallyNonMemberOpen,
   failure,
   submitting,
 }: {
   event: PublicEvent;
   siteKey: string;
   quotaFull: { member: boolean; nonMember: boolean };
+  nonMemberOpen: boolean;
   failure?: FormFailure;
   submitting: boolean;
 }) {
@@ -55,6 +57,7 @@ export function RegistrationForm({
   const [consent, setConsent] = useState(false);
   const [mediaConsent, setMediaConsent] = useState(false);
   const [marketingOptIn, setMarketingOptIn] = useState(false);
+  const [nonMemberOpen, setNonMemberOpen] = useState(initiallyNonMemberOpen);
   const [email, setEmail] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -63,6 +66,28 @@ export function RegistrationForm({
   const touch = (key: string) => setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
   const [count, setCount] = useState(1);
   const [participants, setParticipants] = useState<ParticipantDraft[]>([{ ...emptyParticipant(), ageGroup: "dewasa" }]);
+
+  useEffect(() => {
+    setNonMemberOpen(initiallyNonMemberOpen);
+    if (initiallyNonMemberOpen || !event.nonMemberOpensAt) return;
+
+    const opensAt = Date.parse(event.nonMemberOpensAt);
+    if (Number.isNaN(opensAt)) return;
+
+    let timer: number | undefined;
+    const updateOpenState = () => {
+      const delay = opensAt - Date.now();
+      if (delay <= 0) {
+        setNonMemberOpen(true);
+        return;
+      }
+      timer = window.setTimeout(updateOpenState, Math.min(delay, 2_147_000_000));
+    };
+    updateOpenState();
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [event.nonMemberOpensAt, initiallyNonMemberOpen]);
   const [firstNameTouched, setFirstNameTouched] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState("");
   const [review, setReview] = useState<ReviewSummary | null>(null);
@@ -183,8 +208,14 @@ export function RegistrationForm({
                 {
                   value: "Tidak",
                   label: "Bukan anggota",
-                  hint: quotaFull.nonMember ? "Kuota penuh" : event.priceCents === 0 ? "Gratis" : `${formatEuro(event.priceCents)} per orang (remaja & dewasa)`,
-                  disabled: quotaFull.nonMember,
+                  hint: quotaFull.nonMember
+                    ? "Kuota penuh"
+                    : !nonMemberOpen
+                      ? `Dibuka ${formatDateTime(event.nonMemberOpensAt)} waktu Belanda`
+                      : event.priceCents === 0
+                        ? "Gratis"
+                        : `${formatEuro(event.priceCents)} per orang (remaja & dewasa)`,
+                  disabled: quotaFull.nonMember || !nonMemberOpen,
                 },
               ]}
             />

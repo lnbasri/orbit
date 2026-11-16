@@ -12,6 +12,7 @@ export async function updateRegistrationWindow(
   actor: string,
   eventId: number,
   opensLocal: string,
+  nonMemberOpensLocal: string,
   closesLocal: string,
   now = new Date(),
 ): Promise<EventResult> {
@@ -23,11 +24,22 @@ export async function updateRegistrationWindow(
     return localInputToUtcIso(v) ?? "invalid";
   };
   const opens = parse(opensLocal);
+  const nonMemberOpens = parse(nonMemberOpensLocal);
   const closes = parse(closesLocal);
   if (opens === "invalid") return { ok: false, message: "Waktu pembukaan tidak valid." };
+  if (nonMemberOpens === "invalid") return { ok: false, message: "Waktu pembukaan non-anggota tidak valid." };
   if (closes === "invalid") return { ok: false, message: "Batas pendaftaran tidak valid." };
   if (opens && closes && closes <= opens) {
     return { ok: false, message: "Batas pendaftaran harus setelah waktu pembukaan." };
+  }
+  if (opens && nonMemberOpens && nonMemberOpens < opens) {
+    return { ok: false, message: "Pendaftaran non-anggota tidak boleh dibuka sebelum pendaftaran anggota." };
+  }
+  if (nonMemberOpens && closes && nonMemberOpens >= closes) {
+    return { ok: false, message: "Pendaftaran non-anggota harus dibuka sebelum batas pendaftaran." };
+  }
+  if (nonMemberOpens && nonMemberOpens >= event.starts_at) {
+    return { ok: false, message: "Pendaftaran non-anggota harus dibuka sebelum acara dimulai." };
   }
   if (closes && closes > event.starts_at) {
     return { ok: false, message: "Batas pendaftaran tidak boleh melewati waktu mulai acara." };
@@ -35,14 +47,17 @@ export async function updateRegistrationWindow(
 
   await db.batch([
     db
-      .prepare("UPDATE events SET registration_opens_at = ?, registration_closes_at = ? WHERE id = ?")
-      .bind(opens, closes, eventId),
+      .prepare("UPDATE events SET registration_opens_at = ?, non_member_opens_at = ?, registration_closes_at = ? WHERE id = ?")
+      .bind(opens, nonMemberOpens, closes, eventId),
     auditStatement(
       db,
       actor,
       "event.registration_window",
       event.slug,
-      { from: [event.registration_opens_at, event.registration_closes_at], to: [opens, closes] },
+      {
+        from: [event.registration_opens_at, event.non_member_opens_at, event.registration_closes_at],
+        to: [opens, nonMemberOpens, closes],
+      },
       now.toISOString(),
     ),
   ]);
@@ -72,6 +87,12 @@ export async function updateEventTimes(
   if (ends <= starts) return { ok: false, message: "Waktu selesai harus setelah waktu mulai." };
   if (event.registration_opens_at && event.registration_opens_at >= starts) {
     return { ok: false, message: "Waktu mulai acara harus setelah pendaftaran dibuka. Ubah jadwal pendaftaran lebih dulu." };
+  }
+  if (event.non_member_opens_at && event.non_member_opens_at >= starts) {
+    return {
+      ok: false,
+      message: "Waktu mulai acara harus setelah pendaftaran non-anggota dibuka. Ubah jadwal pendaftaran lebih dulu.",
+    };
   }
   if (event.registration_closes_at && event.registration_closes_at > starts) {
     return {

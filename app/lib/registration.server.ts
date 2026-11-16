@@ -44,6 +44,13 @@ export function registrationWindowError(event: EventRow, now: Date): string | nu
   return null;
 }
 
+export function nonMemberOpeningError(event: EventRow, now: Date): string | null {
+  if (event.non_member_opens_at && now.toISOString() < event.non_member_opens_at) {
+    return "Pendaftaran non-anggota belum dibuka.";
+  }
+  return null;
+}
+
 function resultFromRow(row: RegistrationRow, remaining = 0): RegisterResult {
   switch (row.status) {
     case "pending_membership":
@@ -87,6 +94,10 @@ export async function registerOnline(
   if (!opts.ignoreWindow) {
     const closed = registrationWindowError(event, now);
     if (closed) return { kind: "closed", reason: closed };
+  }
+  if (input.membership === "Tidak") {
+    const nonMemberClosed = nonMemberOpeningError(event, now);
+    if (nonMemberClosed) return { kind: "closed", reason: nonMemberClosed };
   }
   if (input.participants.length > event.max_family) {
     return { kind: "closed", reason: `Maksimal ${event.max_family} peserta per pendaftaran.` };

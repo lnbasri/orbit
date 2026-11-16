@@ -10,6 +10,7 @@ export interface EventRow {
   ends_at: string;
   timezone: string;
   registration_opens_at: string | null;
+  non_member_opens_at: string | null;
   registration_closes_at: string | null;
   quota_member: number;
   quota_non_member: number;

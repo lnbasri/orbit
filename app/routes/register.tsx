@@ -28,7 +28,9 @@ export async function loader({ params }: Route.LoaderArgs) {
   if (!featureEnabled(appEnv, "public")) throw data("Tidak ditemukan.", { status: 404 });
   const event = await getEventBySlug(appEnv.DB, params.slug);
   if (!event) throw data("Acara tidak ditemukan.", { status: 404 });
-  const windowError = registrationWindowError(event, new Date());
+  const now = new Date();
+  const windowError = registrationWindowError(event, now);
+  const nonMemberOpen = !event.non_member_opens_at || now.toISOString() >= event.non_member_opens_at;
   // "Pendaftaran ditutup otomatis bila kuota penuh": per group, and fully closed when both groups are full.
   const quota = await quotaSummary(appEnv.DB, event);
   const memberFull = quota.member.remaining <= 0;
@@ -49,6 +51,7 @@ export async function loader({ params }: Route.LoaderArgs) {
       startsAtHijri: formatHijriDate(event.starts_at), // computed here so server and browser render the same text
       endsAt: event.ends_at,
       registrationClosesAt: event.registration_closes_at,
+      nonMemberOpensAt: event.non_member_opens_at,
       maxFamily: event.max_family,
       infaqUrl: event.infaq_url,
       priceCents: event.price_non_member_cents,
@@ -56,6 +59,7 @@ export async function loader({ params }: Route.LoaderArgs) {
     },
     siteKey: appEnv.TURNSTILE_SITE_KEY ?? "",
     quotaFull: { member: memberFull, nonMember: nonMemberFull },
+    nonMemberOpen,
     windowError: quotaClosed ?? (isDev(appEnv) ? null : windowError),
     devNotice: isDev(appEnv) && windowError ? `Mode lokal: "${windowError}" diabaikan.` : null,
   };
@@ -174,7 +178,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 }
 
 export default function Register({ loaderData, actionData }: Route.ComponentProps) {
-  const { event, siteKey, windowError, devNotice, quotaFull } = loaderData;
+  const { event, siteKey, windowError, devNotice, quotaFull, nonMemberOpen } = loaderData;
   const result = actionData as ActionData | undefined;
   const navigation = useNavigation();
   const submitting = navigation.state === "submitting";
@@ -216,6 +220,7 @@ export default function Register({ loaderData, actionData }: Route.ComponentProp
           event={event}
           siteKey={siteKey}
           quotaFull={quotaFull}
+          nonMemberOpen={nonMemberOpen}
           failure={result && !result.ok ? result : undefined}
           submitting={submitting}
         />
