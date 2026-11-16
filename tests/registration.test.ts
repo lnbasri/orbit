@@ -145,7 +145,8 @@ describe("non-member registration and payment", () => {
 
   it("only remaja and dewasa pay; balita and anak are free but still take a seat", async () => {
     const base = input({ membership: "Tidak", people: 4 });
-    base.participants.forEach((p, i) => (p.ageGroup = ["dewasa", "remaja", "anak", "balita"][i]));
+    const ageGroups = ["dewasa", "remaja", "anak", "balita"] as const;
+    base.participants.forEach((p, i) => (p.ageGroup = ageGroups[i]));
     const r = await registerOnline(db, event, base, opts());
     expect(r).toMatchObject({ kind: "pending_payment", amountCents: 1000 });
     expect(await getParticipants(db, (r as { registrationId: string }).registrationId)).toHaveLength(4);

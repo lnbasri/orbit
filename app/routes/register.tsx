@@ -15,7 +15,7 @@ import { getAppEnv } from "~/lib/env.server";
 import { getEventBySlug } from "~/lib/db.server";
 import { formatHijriDate } from "~/lib/format";
 import { deliverEmail } from "~/lib/email/send.server";
-import { quotaSummary, registerOnline, registrationWindowError } from "~/lib/registration.server";
+import { nonMemberOpeningError, quotaSummary, registerOnline, registrationWindowError } from "~/lib/registration.server";
 import { verifyTurnstile } from "~/lib/turnstile.server";
 import { formToRegistrationDraft, registrationSchema, toFieldErrors, type FieldErrors } from "~/lib/validation";
 
@@ -28,7 +28,10 @@ export async function loader({ params }: Route.LoaderArgs) {
   if (!featureEnabled(appEnv, "public")) throw data("Tidak ditemukan.", { status: 404 });
   const event = await getEventBySlug(appEnv.DB, params.slug);
   if (!event) throw data("Acara tidak ditemukan.", { status: 404 });
-  const windowError = registrationWindowError(event, new Date());
+  const now = new Date();
+  const windowError = registrationWindowError(event, now);
+  const nonMemberError = nonMemberOpeningError(event, now);
+  const nonMemberOpen = !nonMemberError || isDev(appEnv); // dev ignores the window, like registerOnline
   // "Pendaftaran ditutup otomatis bila kuota penuh": per group, and fully closed when both groups are full.
   const quota = await quotaSummary(appEnv.DB, event);
   const memberFull = quota.member.remaining <= 0;
@@ -49,6 +52,7 @@ export async function loader({ params }: Route.LoaderArgs) {
       startsAtHijri: formatHijriDate(event.starts_at), // computed here so server and browser render the same text
       endsAt: event.ends_at,
       registrationClosesAt: event.registration_closes_at,
+      nonMemberOpensAt: event.non_member_opens_at,
       maxFamily: event.max_family,
       infaqUrl: event.infaq_url,
       priceCents: event.price_non_member_cents,
@@ -56,8 +60,11 @@ export async function loader({ params }: Route.LoaderArgs) {
     },
     siteKey: appEnv.TURNSTILE_SITE_KEY ?? "",
     quotaFull: { member: memberFull, nonMember: nonMemberFull },
+    nonMemberOpen,
+    serverNow: now.toISOString(),
     windowError: quotaClosed ?? (isDev(appEnv) ? null : windowError),
-    devNotice: isDev(appEnv) && windowError ? `Mode lokal: "${windowError}" diabaikan.` : null,
+    devNotice:
+      isDev(appEnv) && (windowError ?? nonMemberError) ? `Mode lokal: "${windowError ?? nonMemberError}" diabaikan.` : null,
   };
 }
 
@@ -174,7 +181,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 }
 
 export default function Register({ loaderData, actionData }: Route.ComponentProps) {
-  const { event, siteKey, windowError, devNotice, quotaFull } = loaderData;
+  const { event, siteKey, windowError, devNotice, quotaFull, nonMemberOpen, serverNow } = loaderData;
   const result = actionData as ActionData | undefined;
   const navigation = useNavigation();
   const submitting = navigation.state === "submitting";
@@ -216,6 +223,8 @@ export default function Register({ loaderData, actionData }: Route.ComponentProp
           event={event}
           siteKey={siteKey}
           quotaFull={quotaFull}
+          nonMemberOpen={nonMemberOpen}
+          serverNow={serverNow}
           failure={result && !result.ok ? result : undefined}
           submitting={submitting}
         />

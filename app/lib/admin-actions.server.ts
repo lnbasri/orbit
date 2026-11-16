@@ -126,6 +126,7 @@ export async function handleAdminIntent(env: AppEnv, actor: string, form: FormDa
         actor,
         event.id,
         String(form.get("opensAt") ?? ""),
+        String(form.get("nonMemberOpensAt") ?? ""),
         String(form.get("closesAt") ?? ""),
       );
     }

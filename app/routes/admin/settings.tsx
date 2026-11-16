@@ -52,8 +52,10 @@ export async function loader() {
     startsAtLocal: utcIsoToLocalInput(event.starts_at),
     endsAtLocal: utcIsoToLocalInput(event.ends_at),
     opensAt: utcIsoToLocalInput(event.registration_opens_at),
+    nonMemberOpensAt: utcIsoToLocalInput(event.non_member_opens_at),
     closesAt: utcIsoToLocalInput(event.registration_closes_at),
     closesAtUtc: event.registration_closes_at,
+    nonMemberOpensAtUtc: event.non_member_opens_at,
     price: (event.price_non_member_cents / 100).toFixed(2).replace(/\.00$/, "").replace(".", ","),
     priceCents: event.price_non_member_cents,
     selfAdd: event.self_add_allowed === 1,
@@ -66,7 +68,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { title, speaker, theme, locationName, locationAddress, locationMapUrl, infaqUrl, startsAt, startsAtLocal, endsAtLocal, opensAt, closesAt, closesAtUtc, state, price, priceCents, quota, selfAdd } = loaderData;
+  const { title, speaker, theme, locationName, locationAddress, locationMapUrl, infaqUrl, startsAt, startsAtLocal, endsAtLocal, opensAt, nonMemberOpensAt, closesAt, closesAtUtc, nonMemberOpensAtUtc, state, price, priceCents, quota, selfAdd } = loaderData;
   const fetcher = useFetcher<{ ok: boolean; message: string }>();
   const timesFetcher = useFetcher<{ ok: boolean; message: string }>();
   const timesBusy = timesFetcher.state !== "idle";
@@ -85,8 +87,9 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
   useEffect(() => {
     if (!formRef.current) return;
     (formRef.current.elements.namedItem("opensAt") as HTMLInputElement).value = opensAt;
+    (formRef.current.elements.namedItem("nonMemberOpensAt") as HTMLInputElement).value = nonMemberOpensAt;
     (formRef.current.elements.namedItem("closesAt") as HTMLInputElement).value = closesAt;
-  }, [opensAt, closesAt]);
+  }, [opensAt, nonMemberOpensAt, closesAt]);
 
   return (
     <div>
@@ -132,6 +135,12 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
         <fetcher.Form ref={formRef} method="post" className="grid gap-4 sm:grid-cols-2">
           <input type="hidden" name="intent" value="save-event-settings" />
           <TextField name="opensAt" type="datetime-local" label="Pendaftaran dibuka" defaultValue={opensAt} />
+          <TextField
+            name="nonMemberOpensAt"
+            type="datetime-local"
+            label="Pendaftaran non-anggota dibuka"
+            defaultValue={nonMemberOpensAt}
+          />
           <TextField name="closesAt" type="datetime-local" label="Batas pendaftaran (ditutup)" defaultValue={closesAt} />
           <div className="sm:col-span-2">
             <button type="submit" disabled={busy} className={buttonClass("primary", "md", "w-full sm:w-auto")}>
@@ -148,8 +157,12 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
         <ul className="mt-6 space-y-2 border-t border-slate-100 pt-5 text-xs text-slate-500">
           <Hint icon={ClockIcon}>Waktu dalam zona waktu Belanda (Europe/Amsterdam).</Hint>
           <Hint icon={CalendarDaysIcon}>
-            Kosongkan kolom untuk tanpa batas. Pendaftaran selalu berakhir saat acara dimulai ({formatDateTime(startsAt)}).
+            Kosongkan kolom pembukaan non-anggota agar mereka dapat mendaftar sejak pendaftaran umum dibuka.
+            Kosongkan batas pendaftaran untuk tanpa batas. Pendaftaran selalu berakhir saat acara dimulai ({formatDateTime(startsAt)}).
           </Hint>
+          {nonMemberOpensAtUtc ? (
+            <Hint icon={UsersIcon}>Pendaftaran non-anggota dibuka {formatDateTime(nonMemberOpensAtUtc)} waktu Belanda.</Hint>
+          ) : null}
           <Hint icon={LockClosedIcon}>
             Pendaftaran juga ditutup otomatis bila kuota sudah penuh, berapa pun batas waktunya.
           </Hint>

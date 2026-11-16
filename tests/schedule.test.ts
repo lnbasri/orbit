@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getEventById } from "../app/lib/db.server";
 import { parseEuroToCents, updateEventDetails, updateEventPrice, updateEventTimes, updateQuotas, updateRegistrationWindow } from "../app/lib/events.server";
 import { localInputToUtcIso, utcIsoToLocalInput } from "../app/lib/format";
-import { quotaSummary, registerOnline, registrationWindowError } from "../app/lib/registration.server";
+import { nonMemberOpeningError, quotaSummary, registerOnline, registrationWindowError } from "../app/lib/registration.server";
 import { T0, input, resetDb, startDb } from "./helpers";
 
 describe("Netherlands wall-clock <-> UTC", () => {
@@ -63,41 +63,90 @@ describe("registration window", () => {
     expect((await registerOnline(db, ev, input(), { now: at("2026-11-27T22:59:00.000Z") })).kind).toBe("closed");
     expect((await registerOnline(db, ev, input(), { now: at("2026-11-27T22:58:00.000Z") })).kind).toBe("pending_membership");
   });
+
+  it("opens non-member registration at its scheduled time without blocking members", async () => {
+    const event = await getEventById(db, 1);
+    const ev = { ...event!, non_member_opens_at: "2026-11-23T23:00:00.000Z", price_non_member_cents: 500, registration_opens_at: null, registration_closes_at: null };
+    const before = at("2026-11-23T22:59:59.000Z");
+    const opensAt = at("2026-11-23T23:00:00.000Z");
+
+    expect(nonMemberOpeningError(ev, before)).toMatch(/belum dibuka/);
+    expect((await registerOnline(db, ev, input({ membership: "Tidak" }), { now: before })).kind).toBe("closed");
+    expect((await registerOnline(db, ev, input({ membership: "Ya" }), { now: before })).kind).toBe(
+      "pending_membership",
+    );
+    expect((await registerOnline(db, ev, input({ membership: "Tidak" }), { now: opensAt })).kind).toBe(
+      "pending_payment",
+    );
+    // local dev ignores the whole window, including the non-member opening time
+    expect((await registerOnline(db, ev, input({ membership: "Tidak", email: "dev@x.nl" }), { now: before, ignoreWindow: true })).kind).toBe(
+      "pending_payment",
+    );
+  });
 });
 
 describe("admin: save registration window", () => {
   it("stores Netherlands time as UTC, audits it, and can clear the deadline", async () => {
-    const res = await updateRegistrationWindow(db, "admin@x.nl", 1, "2026-11-16T00:00", "2026-11-29T20:00");
+    const res = await updateRegistrationWindow(
+      db,
+      "admin@x.nl",
+      1,
+      "2026-11-16T00:00",
+      "2026-11-23T00:00",
+      "2026-11-29T20:00",
+    );
     expect(res.ok).toBe(true);
     const e = (await getEventById(db, 1))!;
     expect(e.registration_opens_at).toBe("2026-11-15T23:00:00.000Z");
+    expect(e.non_member_opens_at).toBe("2026-11-22T23:00:00.000Z");
     expect(e.registration_closes_at).toBe("2026-11-29T19:00:00.000Z");
     const audit = await db.prepare("SELECT actor FROM audit_log WHERE action = 'event.registration_window'").first();
     expect(audit).toMatchObject({ actor: "admin@x.nl" });
 
-    expect((await updateRegistrationWindow(db, "admin@x.nl", 1, "", "")).ok).toBe(true);
+    expect((await updateRegistrationWindow(db, "admin@x.nl", 1, "", "", "")).ok).toBe(true);
     const cleared = (await getEventById(db, 1))!;
-    expect([cleared.registration_opens_at, cleared.registration_closes_at]).toEqual([null, null]);
+    expect([cleared.registration_opens_at, cleared.non_member_opens_at, cleared.registration_closes_at]).toEqual([
+      null,
+      null,
+      null,
+    ]);
   });
 
   it("rejects bad input and impossible schedules without changing anything", async () => {
-    await updateRegistrationWindow(db, "admin@x.nl", 1, "2026-11-16T00:00", "2026-11-27T23:59");
+    await updateRegistrationWindow(db, "admin@x.nl", 1, "2026-11-16T00:00", "", "2026-11-27T23:59");
     const before = (await getEventById(db, 1))!;
-    for (const [o, c, msg] of [
-      ["nonsense", "2026-11-27T23:59", /pembukaan tidak valid/],
-      ["2026-11-16T00:00", "nonsense", /Batas pendaftaran tidak valid/],
-      ["2026-11-20T10:00", "2026-11-20T09:00", /setelah waktu pembukaan/],
-      ["2026-11-16T00:00", "2026-12-05T10:00", /melewati waktu mulai acara/],
+    for (const [o, n, c, msg] of [
+      ["nonsense", "", "2026-11-27T23:59", /pembukaan tidak valid/],
+      ["2026-11-16T00:00", "nonsense", "2026-11-27T23:59", /pembukaan non-anggota tidak valid/],
+      ["2026-11-16T00:00", "", "nonsense", /Batas pendaftaran tidak valid/],
+      ["2026-11-20T10:00", "", "2026-11-20T09:00", /setelah waktu pembukaan/],
+      ["2026-11-16T00:00", "", "2026-12-05T10:00", /melewati waktu mulai acara/],
+      ["2026-11-20T10:00", "2026-11-19T10:00", "2026-11-27T23:59", /sebelum pendaftaran anggota/],
+      ["2026-11-16T00:00", "2026-11-28T00:00", "2026-11-27T23:59", /sebelum batas pendaftaran/],
+      ["2026-11-16T00:00", "2026-12-05T10:00", "", /sebelum acara dimulai/],
     ] as const) {
-      const res = await updateRegistrationWindow(db, "admin@x.nl", 1, o, c);
+      const res = await updateRegistrationWindow(db, "admin@x.nl", 1, o, n, c);
       expect(res).toMatchObject({ ok: false, message: expect.stringMatching(msg) });
     }
     const after = (await getEventById(db, 1))!;
-    expect([after.registration_opens_at, after.registration_closes_at]).toEqual([before.registration_opens_at, before.registration_closes_at]);
+    expect([after.registration_opens_at, after.non_member_opens_at, after.registration_closes_at]).toEqual([
+      before.registration_opens_at,
+      before.non_member_opens_at,
+      before.registration_closes_at,
+    ]);
+  });
+
+  it("does not allow moving the event before the non-member opening time", async () => {
+    await updateRegistrationWindow(db, "admin@x.nl", 1, "", "2026-12-04T13:00", "");
+    const result = await updateEventTimes(db, "admin@x.nl", 1, "2026-12-04T12:00", "2026-12-04T14:00");
+    expect(result).toMatchObject({
+      ok: false,
+      message: expect.stringMatching(/setelah pendaftaran non-anggota dibuka/),
+    });
   });
 
   it("a deadline change takes effect for the next registration immediately", async () => {
-    await updateRegistrationWindow(db, "admin@x.nl", 1, "", "2026-11-20T12:00");
+    await updateRegistrationWindow(db, "admin@x.nl", 1, "", "", "2026-11-20T12:00");
     const e = (await getEventById(db, 1))!;
     expect((await registerOnline(db, e, input(), { now: at("2026-11-20T10:59:00.000Z") })).kind).toBe("pending_membership");
     expect((await registerOnline(db, e, input(), { now: at("2026-11-20T11:00:00.000Z") })).kind).toBe("closed");

@@ -35,6 +35,7 @@ export interface PublicEvent {
   startsAtHijri?: string;
   endsAt: string;
   registrationClosesAt: string | null;
+  nonMemberOpensAt?: string | null;
   maxFamily: number;
   priceCents: number;
   payWindowHours: number;
