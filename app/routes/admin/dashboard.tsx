@@ -18,17 +18,17 @@ export function meta() {
 
 export async function loader() {
   const db = getAppEnv().DB;
-  const [members, active, pending, households, groups] = await Promise.all([
+  const [members, active, inactive, households, groups] = await Promise.all([
     db.prepare("SELECT COUNT(*) AS count FROM members WHERE archived_at IS NULL").first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM members WHERE archived_at IS NULL AND status = 'active'").first<{ count: number }>(),
-    db.prepare("SELECT COUNT(*) AS count FROM members WHERE archived_at IS NULL AND status = 'pending'").first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM members WHERE archived_at IS NULL AND status = 'inactive'").first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM households").first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM administrative_groups").first<{ count: number }>(),
   ]);
   return {
     members: members?.count ?? 0,
     activeMembers: active?.count ?? 0,
-    pendingMembers: pending?.count ?? 0,
+    inactiveMembers: inactive?.count ?? 0,
     households: households?.count ?? 0,
     groups: groups?.count ?? 0,
   };
@@ -46,7 +46,7 @@ export default function OrbitDashboard({ loaderData }: Route.ComponentProps) {
         <Stat icon={UsersIcon} label="Members" value={loaderData.members} sub={`${loaderData.activeMembers} active`} />
         <Stat icon={BuildingOffice2Icon} label="Households" value={loaderData.households} />
         <Stat icon={RectangleGroupIcon} label="Administrative groups" value={loaderData.groups} />
-        <Stat icon={UsersIcon} label="Pending members" value={loaderData.pendingMembers} />
+        <Stat icon={UsersIcon} label="Inactive members" value={loaderData.inactiveMembers} />
       </StatGroup>
 
       <div className="grid gap-6 md:grid-cols-3">

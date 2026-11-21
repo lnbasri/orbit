@@ -57,17 +57,45 @@ export function MemberEditor({
         <input type="hidden" name="intent" value="save-member" />
         <Panel title="Personal information">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Full name" name="fullName" required defaultValue={member.full_name} />
+            <Field label="First name" name="firstName" required maxLength={120} defaultValue={member.first_name ?? member.full_name} />
+            <Field label="Middle name" name="middleName" maxLength={120} defaultValue={member.middle_name ?? ""} />
+            <Field label="Family name" name="familyName" required maxLength={120} defaultValue={member.family_name ?? ""} />
             <Field label="Preferred name" name="preferredName" defaultValue={member.preferred_name ?? ""} />
+            <Field label="Date of birth" name="dateOfBirth" type="date" defaultValue={member.date_of_birth ?? ""} />
+            <label className="text-sm font-medium text-slate-700">
+              Gender
+              <select name="gender" defaultValue={member.gender ?? ""} className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/15">
+                <option value="">Prefer not to specify</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="non_binary">Non-binary</option>
+                <option value="other">Other</option>
+                <option value="prefer_not_to_say">Prefer not to say</option>
+              </select>
+            </label>
             <Field label="Email" name="email" type="email" defaultValue={member.email ?? ""} />
             <Field label="Phone" name="phone" type="tel" defaultValue={member.phone ?? ""} />
+            <Field label="Address" name="address" maxLength={240} defaultValue={member.address ?? ""} />
+            <Field label="Postal code" name="postalCode" maxLength={20} defaultValue={member.postal_code ?? ""} />
+            <Field label="City" name="city" maxLength={120} defaultValue={member.city ?? ""} />
+            <Field label="Country" name="country" maxLength={120} defaultValue={member.country ?? ""} />
+            <Field label="Preferred language" name="preferredLanguage" maxLength={80} defaultValue={member.preferred_language ?? ""} placeholder="e.g. English" />
+            <label className="flex min-h-11 items-center gap-2 self-end text-sm font-medium text-slate-700">
+              <input type="checkbox" name="communicationConsent" defaultChecked={member.communication_consent === 1} className="size-4 rounded border-slate-300 text-brand focus:ring-brand" />
+              Communication consent
+            </label>
             <label className="text-sm font-medium text-slate-700">
               Membership status
               <select name="status" defaultValue={member.status} className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/15">
                 <option value="active">Active</option>
-                <option value="pending">Pending</option>
                 <option value="inactive">Inactive</option>
+                <option value="moved">Moved</option>
+                <option value="deceased">Deceased</option>
               </select>
+            </label>
+            <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+              Status note
+              <textarea name="statusNote" rows={2} maxLength={2000} defaultValue={member.status_note ?? ""} placeholder="Reason or relevant information for this status" className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/15" />
             </label>
             <Field label="Joined on" name="joinedOn" type="date" defaultValue={member.joined_on ?? ""} />
             <label className="text-sm font-medium text-slate-700 sm:col-span-2">

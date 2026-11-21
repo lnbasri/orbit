@@ -18,11 +18,12 @@ export async function loader({ url }: Route.LoaderArgs) {
   return { q, status, ...(await listMembers(getAppEnv().DB, { q, status, page })) };
 }
 
-const STATUS_LABEL: Record<string, string> = { active: "Active", inactive: "Inactive", pending: "Pending" };
+const STATUS_LABEL: Record<string, string> = { active: "Active", inactive: "Inactive", moved: "Moved", deceased: "Deceased" };
 const STATUS_STYLE: Record<string, string> = {
   active: "bg-emerald-50 text-emerald-800 ring-emerald-600/20",
   inactive: "bg-slate-100 text-slate-700 ring-slate-500/20",
-  pending: "bg-amber-50 text-amber-800 ring-amber-600/20",
+  moved: "bg-sky-50 text-sky-800 ring-sky-600/20",
+  deceased: "bg-red-50 text-red-800 ring-red-600/20",
 };
 
 export default function Members({ loaderData }: Route.ComponentProps) {
@@ -49,8 +50,9 @@ export default function Members({ loaderData }: Route.ComponentProps) {
             <select name="status" defaultValue={status} className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/15 sm:w-44">
               <option value="">All statuses</option>
               <option value="active">Active</option>
-              <option value="pending">Pending</option>
               <option value="inactive">Inactive</option>
+              <option value="moved">Moved</option>
+              <option value="deceased">Deceased</option>
             </select>
           </label>
           <button type="submit" className={buttonClass("secondary", "md")}>Filter</button>

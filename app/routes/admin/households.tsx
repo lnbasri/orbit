@@ -29,6 +29,8 @@ export async function action({ request, context }: Route.ActionArgs) {
       postalCode: String(form.get("postalCode") ?? ""),
       city: String(form.get("city") ?? ""),
       country: String(form.get("country") ?? ""),
+      status: String(form.get("status") ?? "active"),
+      statusNote: String(form.get("statusNote") ?? ""),
     },
     String(form.get("householdId") ?? "") || undefined,
   );
@@ -61,6 +63,14 @@ export default function Households({ loaderData, actionData }: Route.ComponentPr
                   <TextField name="postalCode" label="Postal code" maxLength={20} defaultValue={household.postal_code ?? ""} />
                   <TextField name="city" label="City" maxLength={120} defaultValue={household.city ?? ""} />
                   <TextField name="country" label="Country" maxLength={120} defaultValue={household.country ?? ""} />
+                  <label className="text-sm font-medium text-slate-700">
+                    Status
+                    <select name="status" defaultValue={household.status} className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/15">
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </label>
+                  <TextField name="statusNote" label="Status note" maxLength={2000} defaultValue={household.status_note ?? ""} />
                   <button type="submit" className={`${buttonClass("secondary", "md")} self-end`}>Save household</button>
                 </Form>
               </li>
@@ -81,6 +91,14 @@ function HouseholdForm() {
       <TextField name="postalCode" label="Postal code" maxLength={20} />
       <TextField name="city" label="City" maxLength={120} />
       <TextField name="country" label="Country" maxLength={120} />
+      <label className="text-sm font-medium text-slate-700">
+        Status
+        <select name="status" defaultValue="active" className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/15">
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </label>
+      <TextField name="statusNote" label="Status note" maxLength={2000} />
       <button type="submit" className={`${buttonClass("primary", "md")} self-end`}>Add household</button>
     </Form>
   );

@@ -54,9 +54,22 @@ CREATE TABLE members (
   id TEXT PRIMARY KEY,
   full_name TEXT NOT NULL,
   preferred_name TEXT,
+  first_name TEXT,
+  middle_name TEXT,
+  family_name TEXT,
+  date_of_birth TEXT,
+  gender TEXT CHECK (gender IN ('male', 'female')),
+  address TEXT,
+  postal_code TEXT,
+  city TEXT,
+  country TEXT,
+  preferred_language TEXT,
+  communication_consent INTEGER NOT NULL DEFAULT 0 CHECK (communication_consent IN (0, 1)),
   email TEXT,
   phone TEXT,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'pending')),
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'inactive', 'moved', 'deceased')),
+  status_note TEXT,
   joined_on TEXT,
   notes TEXT,
   created_at TEXT NOT NULL,
@@ -73,6 +86,9 @@ CREATE TABLE households (
   postal_code TEXT,
   city TEXT,
   country TEXT,
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'inactive')),
+  status_note TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

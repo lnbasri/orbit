@@ -5,9 +5,21 @@ import { auditStatement } from "./db.server";
 const memberSchema = z.object({
   fullName: z.string().trim().min(1, "Name is required.").max(120, "Name is too long."),
   preferredName: z.string().trim().max(120, "Preferred name is too long."),
+  firstName: z.string().trim().max(120, "First name is too long."),
+  middleName: z.string().trim().max(120, "Middle name is too long."),
+  familyName: z.string().trim().max(120, "Family name is too long."),
+  dateOfBirth: z.string().regex(/^$|^\d{4}-\d{2}-\d{2}$/, "Date of birth is invalid."),
+  gender: z.enum(["", "male", "female", "non_binary", "other", "prefer_not_to_say"]),
+  address: z.string().trim().max(240, "Address is too long."),
+  postalCode: z.string().trim().max(20, "Postal code is too long."),
+  city: z.string().trim().max(120, "City is too long."),
+  country: z.string().trim().max(120, "Country is too long."),
+  preferredLanguage: z.string().trim().max(80, "Preferred language is too long."),
+  communicationConsent: z.boolean(),
   email: z.string().trim().toLowerCase().pipe(z.union([z.literal(""), z.email("Enter a valid email address.")])),
   phone: z.string().trim().max(40, "Phone number is too long."),
-  status: z.enum(["active", "inactive", "pending"]),
+  status: z.enum(["active", "inactive", "moved", "deceased"]),
+  statusNote: z.string().trim().max(2000, "Status notes are too long."),
   joinedOn: z.string().regex(/^$|^\d{4}-\d{2}-\d{2}$/, "Join date is invalid."),
   notes: z.string().trim().max(2000, "Notes are too long."),
 });
@@ -19,9 +31,21 @@ export interface MemberRow {
   id: string;
   full_name: string;
   preferred_name: string | null;
+  first_name: string | null;
+  middle_name: string | null;
+  family_name: string | null;
+  date_of_birth: string | null;
+  gender: "" | "male" | "female" | "non_binary" | "other" | "prefer_not_to_say" | null;
+  address: string | null;
+  postal_code: string | null;
+  city: string | null;
+  country: string | null;
+  preferred_language: string | null;
+  communication_consent: number;
   email: string | null;
   phone: string | null;
   status: MemberStatus;
+  status_note: string | null;
   joined_on: string | null;
   notes: string | null;
   created_at: string;
@@ -35,6 +59,8 @@ export interface HouseholdRow {
   postal_code: string | null;
   city: string | null;
   country: string | null;
+  status: "active" | "inactive";
+  status_note: string | null;
   created_at: string;
   updated_at: string;
   member_count?: number;
@@ -96,11 +122,11 @@ export async function listMembers(db: D1Database, filters: MemberFilters) {
   const binds: string[] = [];
   const q = filters.q.trim();
   if (q) {
-    where.push("(full_name LIKE ? OR preferred_name LIKE ? OR email LIKE ? OR phone LIKE ?)");
+    where.push("(full_name LIKE ? OR preferred_name LIKE ? OR first_name LIKE ? OR middle_name LIKE ? OR family_name LIKE ? OR email LIKE ? OR phone LIKE ?)");
     const like = `%${q}%`;
-    binds.push(like, like, like, like);
+    binds.push(like, like, like, like, like, like, like);
   }
-  if (filters.status === "active" || filters.status === "inactive" || filters.status === "pending") {
+  if (filters.status === "active" || filters.status === "inactive" || filters.status === "moved" || filters.status === "deceased") {
     where.push("status = ?");
     binds.push(filters.status);
   }
@@ -114,7 +140,10 @@ export async function listMembers(db: D1Database, filters: MemberFilters) {
   const page = Math.min(Math.max(1, filters.page), pageCount);
   const { results } = await db
     .prepare(
-      `SELECT id, full_name, preferred_name, email, phone, status, joined_on, created_at, updated_at
+      `SELECT id, full_name, preferred_name, first_name, middle_name, family_name,
+              date_of_birth, gender, address, postal_code, city, country,
+              preferred_language, communication_consent, email, phone, status, status_note,
+              joined_on, created_at, updated_at
        FROM members WHERE ${clause} ORDER BY full_name COLLATE NOCASE, id LIMIT ? OFFSET ?`,
     )
     .bind(...binds, MEMBER_PAGE_SIZE, (page - 1) * MEMBER_PAGE_SIZE)
@@ -234,9 +263,21 @@ export async function saveMember(
   raw: {
     fullName: string;
     preferredName: string;
+    firstName: string;
+    middleName: string;
+    familyName: string;
+    dateOfBirth: string;
+    gender: string;
+    address: string;
+    postalCode: string;
+    city: string;
+    country: string;
+    preferredLanguage: string;
+    communicationConsent: boolean;
     email: string;
     phone: string;
     status: string;
+    statusNote: string;
     joinedOn: string;
     notes: string;
   },
@@ -249,6 +290,8 @@ export async function saveMember(
   const parsed = memberSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Member data is invalid." };
   const value = parsed.data;
+  const generatedFullName = [value.firstName, value.middleName, value.familyName].filter(Boolean).join(" ").trim();
+  if (generatedFullName) value.fullName = generatedFullName;
   const timestamp = now.toISOString();
   const uniqueGroupIds = [...new Set(groupIds.filter(Boolean))];
   const [member, households, allGroups] = await Promise.all([
@@ -275,9 +318,21 @@ export async function saveMember(
     : {
         full_name: { from: null, to: value.fullName },
         preferred_name: { from: null, to: value.preferredName || null },
+        first_name: { from: null, to: value.firstName || null },
+        middle_name: { from: null, to: value.middleName || null },
+        family_name: { from: null, to: value.familyName || null },
+        date_of_birth: { from: null, to: value.dateOfBirth || null },
+        gender: { from: null, to: value.gender || null },
+        address: { from: null, to: value.address || null },
+        postal_code: { from: null, to: value.postalCode || null },
+        city: { from: null, to: value.city || null },
+        country: { from: null, to: value.country || null },
+        preferred_language: { from: null, to: value.preferredLanguage || null },
+        communication_consent: { from: null, to: value.communicationConsent ? 1 : 0 },
         email: { from: null, to: value.email || null },
         phone: { from: null, to: value.phone || null },
         status: { from: null, to: value.status },
+        status_note: { from: null, to: value.statusNote || null },
         joined_on: { from: null, to: value.joinedOn || null },
         notes: { from: null, to: value.notes || null },
       };
@@ -287,15 +342,31 @@ export async function saveMember(
     statements.push(
       db
         .prepare(
-          `UPDATE members SET full_name = ?, preferred_name = ?, email = ?, phone = ?, status = ?,
-           joined_on = ?, notes = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL`,
+          `UPDATE members SET
+             full_name = ?, preferred_name = ?, first_name = ?, middle_name = ?, family_name = ?,
+             date_of_birth = ?, gender = ?, address = ?, postal_code = ?, city = ?, country = ?,
+             preferred_language = ?, communication_consent = ?, email = ?, phone = ?, status = ?,
+             status_note = ?, joined_on = ?, notes = ?, updated_at = ?
+           WHERE id = ? AND archived_at IS NULL`,
         )
         .bind(
           value.fullName,
           value.preferredName || null,
+          value.firstName || null,
+          value.middleName || null,
+          value.familyName || null,
+          value.dateOfBirth || null,
+          value.gender || null,
+          value.address || null,
+          value.postalCode || null,
+          value.city || null,
+          value.country || null,
+          value.preferredLanguage || null,
+          value.communicationConsent ? 1 : 0,
           value.email || null,
           value.phone || null,
           value.status,
+          value.statusNote || null,
           value.joinedOn || null,
           value.notes || null,
           timestamp,
@@ -307,16 +378,31 @@ export async function saveMember(
       db
         .prepare(
           `INSERT INTO members
-           (id, full_name, preferred_name, email, phone, status, joined_on, notes, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, full_name, preferred_name, first_name, middle_name, family_name,
+            date_of_birth, gender, address, postal_code, city, country,
+            preferred_language, communication_consent, email, phone, status, status_note,
+            joined_on, notes, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           memberId,
           value.fullName,
           value.preferredName || null,
+          value.firstName || null,
+          value.middleName || null,
+          value.familyName || null,
+          value.dateOfBirth || null,
+          value.gender || null,
+          value.address || null,
+          value.postalCode || null,
+          value.city || null,
+          value.country || null,
+          value.preferredLanguage || null,
+          value.communicationConsent ? 1 : 0,
           value.email || null,
           value.phone || null,
           value.status,
+          value.statusNote || null,
           value.joinedOn || null,
           value.notes || null,
           timestamp,
@@ -345,9 +431,21 @@ function diffMember(member: MemberRow, value: MemberInput) {
   const fields = {
     full_name: [member.full_name, value.fullName],
     preferred_name: [member.preferred_name, value.preferredName || null],
+    first_name: [member.first_name, value.firstName || null],
+    middle_name: [member.middle_name, value.middleName || null],
+    family_name: [member.family_name, value.familyName || null],
+    date_of_birth: [member.date_of_birth, value.dateOfBirth || null],
+    gender: [member.gender, value.gender || null],
+    address: [member.address, value.address || null],
+    postal_code: [member.postal_code, value.postalCode || null],
+    city: [member.city, value.city || null],
+    country: [member.country, value.country || null],
+    preferred_language: [member.preferred_language, value.preferredLanguage || null],
+    communication_consent: [member.communication_consent, value.communicationConsent ? 1 : 0],
     email: [member.email, value.email || null],
     phone: [member.phone, value.phone || null],
     status: [member.status, value.status],
+    status_note: [member.status_note, value.statusNote || null],
     joined_on: [member.joined_on, value.joinedOn || null],
     notes: [member.notes, value.notes || null],
   } as const;
@@ -435,7 +533,7 @@ async function groupAssignmentStatements(
 export async function saveHousehold(
   db: D1Database,
   actor: string,
-  input: { name: string; address: string; postalCode: string; city: string; country: string },
+  input: { name: string; address: string; postalCode: string; city: string; country: string; status: string; statusNote: string },
   id?: string,
   now = new Date(),
 ): Promise<SaveEntityResult> {
@@ -445,6 +543,8 @@ export async function saveHousehold(
     postalCode: z.string().trim().max(20),
     city: z.string().trim().max(120),
     country: z.string().trim().max(120),
+    status: z.enum(["active", "inactive"]),
+    statusNote: z.string().trim().max(2000),
   }).safeParse(input);
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Household data is invalid." };
   const householdId = id ?? crypto.randomUUID();
@@ -452,20 +552,20 @@ export async function saveHousehold(
     return { ok: false, message: "Household not found." };
   }
   const timestamp = now.toISOString();
-  const { name, address, postalCode, city, country } = parsed.data;
+  const { name, address, postalCode, city, country, status, statusNote } = parsed.data;
   await db.batch(id ? [
     db
-      .prepare("UPDATE households SET name = ?, address = ?, postal_code = ?, city = ?, country = ?, updated_at = ? WHERE id = ?")
-      .bind(name, address || null, postalCode || null, city || null, country || null, timestamp, id),
-    auditStatement(db, actor, "household.update", id, { name }, timestamp),
+      .prepare("UPDATE households SET name = ?, address = ?, postal_code = ?, city = ?, country = ?, status = ?, status_note = ?, updated_at = ? WHERE id = ?")
+      .bind(name, address || null, postalCode || null, city || null, country || null, status, statusNote || null, timestamp, id),
+    auditStatement(db, actor, "household.update", id, { name, status, statusNote: statusNote || null }, timestamp),
   ] : [
     db
       .prepare(
-        `INSERT INTO households (id, name, address, postal_code, city, country, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO households (id, name, address, postal_code, city, country, status, status_note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(householdId, name, address || null, postalCode || null, city || null, country || null, timestamp, timestamp),
-    auditStatement(db, actor, "household.create", householdId, { name }, timestamp),
+      .bind(householdId, name, address || null, postalCode || null, city || null, country || null, status, statusNote || null, timestamp, timestamp),
+    auditStatement(db, actor, "household.create", householdId, { name, status, statusNote: statusNote || null }, timestamp),
   ]);
   return { ok: true, id: householdId, message: id ? "Household updated." : "Household added." };
 }

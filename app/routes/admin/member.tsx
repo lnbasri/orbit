@@ -37,15 +37,31 @@ export async function action({ request, context, params }: Route.ActionArgs) {
 
   if (intent === "save-member") {
     const groupIds = form.getAll("groupIds").map(String);
+    const firstName = String(form.get("firstName") ?? "").trim();
+    const middleName = String(form.get("middleName") ?? "").trim();
+    const familyName = String(form.get("familyName") ?? "").trim();
+    const fullName = [firstName, middleName, familyName].filter(Boolean).join(" ");
     const result = await saveMember(
       db,
       actor,
       {
-        fullName: String(form.get("fullName") ?? ""),
+        fullName,
         preferredName: String(form.get("preferredName") ?? ""),
+        firstName,
+        middleName,
+        familyName,
+        dateOfBirth: String(form.get("dateOfBirth") ?? ""),
+        gender: String(form.get("gender") ?? ""),
+        address: String(form.get("address") ?? ""),
+        postalCode: String(form.get("postalCode") ?? ""),
+        city: String(form.get("city") ?? ""),
+        country: String(form.get("country") ?? ""),
+        preferredLanguage: String(form.get("preferredLanguage") ?? ""),
+        communicationConsent: form.get("communicationConsent") === "on",
         email: String(form.get("email") ?? ""),
         phone: String(form.get("phone") ?? ""),
         status: String(form.get("status") ?? ""),
+        statusNote: String(form.get("statusNote") ?? ""),
         joinedOn: String(form.get("joinedOn") ?? ""),
         notes: String(form.get("notes") ?? ""),
       },

@@ -24,9 +24,21 @@ beforeEach(async () => {
 const memberInput = (fullName: string) => ({
   fullName,
   preferredName: "",
+  firstName: fullName.split(" ")[0] ?? "",
+  middleName: "",
+  familyName: fullName.split(" ").slice(1).join(" ") || "",
+  dateOfBirth: "",
+  gender: "",
+  address: "",
+  postalCode: "",
+  city: "",
+  country: "",
+  preferredLanguage: "",
+  communicationConsent: false,
   email: "",
   phone: "",
   status: "active" as const,
+  statusNote: "",
   joinedOn: "",
   notes: "",
 });
@@ -35,13 +47,40 @@ describe("member records", () => {
   it("creates members, records an initial history entry, and rejects invalid email", async () => {
     const created = await saveMember(db, "admin@example.org", {
       ...memberInput("  Noor Hasan  "),
+      firstName: "Noor",
+      middleName: "A.",
+      familyName: "Hasan",
+      dateOfBirth: "1990-05-14",
+      gender: "female",
+      address: "Main Street 1",
+      postalCode: "1234 AB",
+      city: "The Hague",
+      country: "NL",
+      preferredLanguage: "English",
+      communicationConsent: true,
       email: "NOOR@example.org",
     });
     expect(created).toMatchObject({ ok: true, message: "Member added." });
     if (!created.ok) return;
 
-    expect(await db.prepare("SELECT full_name, email FROM members WHERE id = ?").bind(created.id).first()).toEqual({
-      full_name: "Noor Hasan",
+    expect(await db.prepare(`
+      SELECT full_name, first_name, middle_name, family_name, date_of_birth,
+             gender, address, postal_code, city, country, preferred_language,
+             communication_consent, email
+      FROM members WHERE id = ?
+    `).bind(created.id).first()).toEqual({
+      full_name: "Noor A. Hasan",
+      first_name: "Noor",
+      middle_name: "A.",
+      family_name: "Hasan",
+      date_of_birth: "1990-05-14",
+      gender: "female",
+      address: "Main Street 1",
+      postal_code: "1234 AB",
+      city: "The Hague",
+      country: "NL",
+      preferred_language: "English",
+      communication_consent: 1,
       email: "noor@example.org",
     });
     const history = await db
@@ -49,7 +88,7 @@ describe("member records", () => {
       .bind(created.id)
       .first<{ changed_by: string; changes_json: string }>();
     expect(history?.changed_by).toBe("admin@example.org");
-    expect(JSON.parse(history!.changes_json)).toMatchObject({ full_name: { from: null, to: "Noor Hasan" } });
+    expect(JSON.parse(history!.changes_json)).toMatchObject({ full_name: { from: null, to: "Noor A. Hasan" } });
 
     expect(await saveMember(db, "admin@example.org", { ...memberInput("Invalid"), email: "not-an-email" })).toMatchObject({
       ok: false,
@@ -62,7 +101,7 @@ describe("member records", () => {
     const household = await saveHousehold(
       db,
       "admin@example.org",
-      { name: "Hasan household", address: "Main Street 1", postalCode: "1234 AB", city: "Den Haag", country: "NL" },
+      { name: "Hasan household", address: "Main Street 1", postalCode: "1234 AB", city: "Den Haag", country: "NL", status: "active", statusNote: "" },
     );
     const group = await saveGroup(db, "admin@example.org", { name: "Board", description: "Board members" });
     expect(household.ok && group.ok).toBe(true);
@@ -93,7 +132,7 @@ describe("member records", () => {
     await saveMember(
       db,
       "admin@example.org",
-      { ...memberInput("Noor Hasan"), email: "noor.new@example.org", status: "inactive" },
+      { ...memberInput("Noor Hasan"), email: "noor.new@example.org", status: "inactive", statusNote: "Temporarily inactive" },
       created.id,
       "",
       [],
@@ -108,6 +147,7 @@ describe("member records", () => {
     expect(JSON.parse(histories.results[1].changes_json)).toMatchObject({
       email: { from: "noor@example.org", to: "noor.new@example.org" },
       status: { from: "active", to: "inactive" },
+      status_note: { from: null, to: "Temporarily inactive" },
     });
     expect(await db.prepare("SELECT valid_until FROM member_households WHERE member_id = ?").bind(created.id).first()).toEqual({
       valid_until: "2026-11-21T10:00:00.000Z",
