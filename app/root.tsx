@@ -1,22 +1,20 @@
-import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import { data, isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 import { ArrowLeftIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 
 import type { Route } from "./+types/root";
 import "@fontsource-variable/inter/wght.css";
-// Arabic greeting (Bismillah, salam): one bundled font so every device renders it the same. Arabic subset only.
-import "@fontsource/noto-naskh-arabic/arabic-400.css";
 import "./app.css";
 import { Backdrop, Eyebrow, Logo } from "~/components/ui";
 
-// No third-party fonts or trackers: Inter is bundled with the app, so the public form only talks to Turnstile.
+// Inter is bundled with the app, so there are no third-party font requests.
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="id">
+    <html lang="en">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#034EA2" />
-        <link rel="icon" href="/favicon.png" type="image/png" />
+        <link rel="icon" href="/orbit-mark.svg" type="image/svg+xml" />
         <Meta />
         <Links />
       </head>
@@ -33,15 +31,24 @@ export default function App() {
   return <Outlet />;
 }
 
+export const middleware: Route.MiddlewareFunction[] = [
+  async ({ url }, next) => {
+    if (url.pathname !== "/" && url.pathname !== "/admin" && !url.pathname.startsWith("/admin/")) {
+      throw data("Not found.", { status: 404 });
+    }
+    return next();
+  },
+];
+
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let message = "Terjadi kesalahan";
-  let details = "Silakan coba beberapa saat lagi.";
+  let message = "Something went wrong";
+  let details = "Please try again in a moment.";
   let status: number | null = null;
   let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
     status = error.status;
-    message = error.status === 404 ? "Halaman tidak ditemukan" : "Terjadi kesalahan";
+    message = error.status === 404 ? "Page not found" : "Something went wrong";
     details = typeof error.data === "string" ? error.data : error.statusText || details;
   } else if (import.meta.env.DEV && error instanceof Error) {
     details = error.message;
@@ -52,7 +59,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
     <Backdrop>
       <main className="mx-auto flex min-h-screen max-w-2xl flex-col px-4 py-10 sm:px-6 sm:py-16">
         <div className="flex items-center justify-between gap-4 border-b border-slate-200/80 pb-6">
-          <Eyebrow>{status ? `Kode ${status}` : "PPME Den Haag"}</Eyebrow>
+          <Eyebrow>{status ? `Error ${status}` : "ORBIT"}</Eyebrow>
           <Logo className="h-10 w-auto sm:h-12" />
         </div>
         <div className="flex gap-4 pt-8">
@@ -61,11 +68,11 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
             <h1 className="text-gradient-brand text-2xl font-bold tracking-tight sm:text-3xl">{message}</h1>
             <p className="mt-3 leading-relaxed text-slate-600">{details}</p>
             <a
-              href="https://www.ppmedenhaag.nl/"
+              href="/"
               className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-brand hover:text-brand-dark"
             >
               <ArrowLeftIcon className="size-4" aria-hidden="true" />
-              Ke situs PPME Den Haag
+              Back to ORBIT
             </a>
           </div>
         </div>

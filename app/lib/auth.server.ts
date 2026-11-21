@@ -20,9 +20,9 @@ export type AuthResult = { ok: true; email: string; method: AuthMethod | "dev" }
 
 export const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
-const COOKIE_SECURE = "__Host-ppme_admin";
+const COOKIE_SECURE = "__Host-orbit_admin";
 /** Plain-http development (localhost) cannot use the __Host- prefix, which requires Secure. */
-const COOKIE_INSECURE = "ppme_admin";
+const COOKIE_INSECURE = "orbit_admin";
 
 // ---------------------------------------------------------------- crypto helpers
 

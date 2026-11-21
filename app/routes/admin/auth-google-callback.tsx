@@ -12,7 +12,7 @@ import { clearFlowCookie, finishGoogleLogin, googleConfig } from "~/lib/google-o
 export async function loader({ request, url }: Route.LoaderArgs) {
   const env = getAppEnv();
   const cfg = googleConfig(env);
-  if (!featureEnabled(env, "admin") || !cfg) throw data("Tidak ditemukan.", { status: 404 });
+  if (!featureEnabled(env, "admin") || !cfg) throw data("Not found.", { status: 404 });
 
   const headers = new Headers({ "Cache-Control": "no-store" });
   headers.append("Set-Cookie", clearFlowCookie(request));

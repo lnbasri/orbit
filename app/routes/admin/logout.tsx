@@ -12,8 +12,8 @@ export function loader() {
 
 export async function action({ request }: Route.ActionArgs) {
   const env = getAppEnv();
-  if (!featureEnabled(env, "admin")) throw data("Tidak ditemukan.", { status: 404 });
-  if (!isSameOrigin(request)) throw data("Permintaan ditolak.", { status: 403 });
+  if (!featureEnabled(env, "admin")) throw data("Not found.", { status: 404 });
+  if (!isSameOrigin(request)) throw data("Request denied.", { status: 403 });
   await destroySession(env.DB, request);
   return redirect("/admin/login?out=1", { headers: { "Set-Cookie": clearSessionCookie(request) } });
 }

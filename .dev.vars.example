@@ -1,24 +1,13 @@
-# Copy to .dev.vars for local development:  cp .dev.vars.example .dev.vars
-# .dev.vars is git-ignored. Production values are set with `npx wrangler secret put <NAME>`.
-
-# Cloudflare Turnstile test secret: always passes.
-# Use 2x0000000000000000000000000000000AA to simulate a failing check.
-TURNSTILE_SECRET=1x0000000000000000000000000000000AA
-
-# Only needed when EMAIL_MODE=resend
-RESEND_API_KEY=
-
-
-# Local only: skip the /admin login and act as this admin (ignored unless APP_ENV=development).
-# Leave it empty to test the real PIN login; the code is printed in the `npm run dev` terminal.
+# Copy to .dev.vars for local development; .dev.vars is git-ignored.
+# Local sign-in can be skipped with DEV_ADMIN_EMAIL when APP_ENV=development.
 DEV_ADMIN_EMAIL=admin@example.com
 
-# Seeds the admins table on first run (comma-separated). Use the same address as DEV_ADMIN_EMAIL or your own.
+# Cloudflare Turnstile's always-pass test secret for local sign-in.
+TURNSTILE_SECRET=1x0000000000000000000000000000000AA
+
+# Seed administrator access on first local use (comma-separated).
 ADMIN_EMAILS=admin@example.com
 
-# Optional Google sign-in (also set GOOGLE_CLIENT_ID in wrangler.jsonc vars). Local redirect URI:
-# http://localhost:5173/admin/auth/google/callback
+# Optional external email sign-in. Keep empty for local development.
+RESEND_API_KEY=
 GOOGLE_CLIENT_SECRET=
-
-# Local only: act as this scanner in the check-in app (/scan). The email must exist in the scanners table. Leave empty to test the real PIN login.
-DEV_SCANNER_EMAIL=

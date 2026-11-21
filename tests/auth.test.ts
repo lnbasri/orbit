@@ -30,30 +30,29 @@ const meta = { ip: "203.0.113.7", userAgent: "Mozilla/5.0 (Windows NT 10.0) Chro
 /** The code is the first word of the subject of the newest outbox email to `to`. */
 async function lastCode(to: string) {
   const row = await db
-    .prepare("SELECT subject, html, kind, registration_id FROM dev_outbox WHERE to_address = ? ORDER BY id DESC LIMIT 1")
+    .prepare("SELECT subject, html, kind FROM dev_outbox WHERE to_address = ? ORDER BY id DESC LIMIT 1")
     .bind(to)
-    .first<{ subject: string; html: string; kind: string; registration_id: string | null }>();
+    .first<{ subject: string; html: string; kind: string }>();
   return row ? { code: row.subject.split(" ")[0], ...row } : null;
 }
 
 const outboxCount = async () => (await db.prepare("SELECT COUNT(*) AS n FROM dev_outbox").first<{ n: number }>())!.n;
 
 function requestWithCookie(token: string) {
-  return new Request("https://admin.example/admin", { headers: { Cookie: `__Host-ppme_admin=${token}` } });
+  return new Request("https://admin.example/admin", { headers: { Cookie: `__Host-orbit_admin=${token}` } });
 }
 const prodEnv = () => ({ APP_ENV: "production", DB: db });
 
 describe("login code request", () => {
-  it("emails a 6-digit code to an admin, stores only a hash, and is not tied to a registration", async () => {
+  it("emails a 6-digit code to an admin and stores only a hash", async () => {
     const res = await requestLoginCode(db, emailCfg, "  Admin@X.nl ", meta, T0);
     expect(res.status).toBe("sent");
     const mail = await lastCode("admin@x.nl");
     expect(mail?.code).toMatch(/^\d{6}$/);
     expect(mail?.kind).toBe("login_code");
-    expect(mail?.registration_id).toBeNull();
     expect(mail?.html).toContain(mail!.code);
-    expect(mail?.html).toContain("https://admin.example/logo-ppme.png");
-    expect(mail?.html).toContain("Belanda");
+    expect(mail?.html).toContain("ORBIT");
+    expect(mail?.html).toContain("Europe/Amsterdam");
 
     const row = await db.prepare("SELECT * FROM admin_login_codes").first<Record<string, string>>();
     expect(row?.email).toBe("admin@x.nl");
@@ -107,7 +106,7 @@ describe("login code verification", () => {
     for (let i = 1; i <= CODE_MAX_ATTEMPTS; i++) {
       const res = await verifyLoginCode(db, "admin@x.nl", wrong, at(i * 1000));
       expect(res.ok).toBe(false);
-      if (i === CODE_MAX_ATTEMPTS && !res.ok) expect(res.message).toContain("Terlalu banyak");
+      if (i === CODE_MAX_ATTEMPTS && !res.ok) expect(res.message).toContain("Too many attempts");
     }
     expect((await verifyLoginCode(db, "admin@x.nl", code, at(10_000))).ok).toBe(false);
   });
@@ -168,7 +167,7 @@ describe("sessions", () => {
     expect((await identifyUser(requestWithCookie("x".repeat(43)), prodEnv(), at(2000))).ok).toBe(false);
     expect((await identifyUser(new Request("https://admin.example/admin"), prodEnv(), at(2000))).ok).toBe(false);
     // the http cookie name is not accepted on https
-    const plain = new Request("https://admin.example/admin", { headers: { Cookie: `ppme_admin=${s.token}` } });
+    const plain = new Request("https://admin.example/admin", { headers: { Cookie: `orbit_admin=${s.token}` } });
     expect((await identifyUser(plain, prodEnv(), at(500))).ok).toBe(false);
   });
 

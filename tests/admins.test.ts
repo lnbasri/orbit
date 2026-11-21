@@ -48,10 +48,10 @@ describe("bootstrap from ADMIN_EMAILS", () => {
 
 describe("authorization lookup", () => {
   it("is case-insensitive and false for strangers", async () => {
-    await ensureBootstrap(db, "Admin@PPME.nl");
-    expect(await isAdmin(db, "admin@ppme.nl")).toBe(true);
-    expect(await isAdmin(db, " ADMIN@ppme.NL ")).toBe(true);
-    expect(await isAdmin(db, "other@ppme.nl")).toBe(false);
+    await ensureBootstrap(db, "Admin@orbit.example");
+    expect(await isAdmin(db, "admin@orbit.example")).toBe(true);
+    expect(await isAdmin(db, " ADMIN@ORBIT.EXAMPLE ")).toBe(true);
+    expect(await isAdmin(db, "other@orbit.example")).toBe(false);
   });
 });
 
@@ -69,7 +69,7 @@ describe("add admin", () => {
   it("rejects invalid and duplicate emails", async () => {
     await ensureBootstrap(db, "a@x.nl");
     expect((await addAdmin(db, "a@x.nl", "not-an-email")).ok).toBe(false);
-    expect(await addAdmin(db, "a@x.nl", "A@X.nl")).toMatchObject({ ok: false, message: expect.stringContaining("sudah") });
+    expect(await addAdmin(db, "a@x.nl", "A@X.nl")).toMatchObject({ ok: false, message: expect.stringContaining("already") });
     expect(await emails()).toEqual(["a@x.nl"]);
   });
 });
@@ -93,7 +93,7 @@ describe("remove admin", () => {
     await ensureBootstrap(db, "a@x.nl");
     expect(await removeAdmin(db, "ghost@x.nl", "a@x.nl")).toMatchObject({
       ok: false,
-      message: expect.stringContaining("terakhir"),
+      message: expect.stringContaining("last administrator"),
     });
     expect(await emails()).toEqual(["a@x.nl"]);
   });
@@ -106,7 +106,7 @@ describe("remove admin", () => {
 
   it("reports an unknown email clearly", async () => {
     await ensureBootstrap(db, "a@x.nl,b@x.nl");
-    expect(await removeAdmin(db, "a@x.nl", "zzz@x.nl")).toMatchObject({ ok: false, message: expect.stringContaining("bukan admin") });
+    expect(await removeAdmin(db, "a@x.nl", "zzz@x.nl")).toMatchObject({ ok: false, message: expect.stringContaining("not an administrator") });
   });
 });
 

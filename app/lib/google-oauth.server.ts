@@ -31,7 +31,7 @@ export function googleConfig(env: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SEC
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
-const FLOW_COOKIE = "ppme_oauth";
+const FLOW_COOKIE = "orbit_oauth";
 const FLOW_TTL_S = 600;
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;

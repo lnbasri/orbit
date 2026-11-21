@@ -2,8 +2,7 @@ import { normalizeEmail } from "./admins.server";
 import { sha256Hex, timingSafeEqual, type RequestMeta } from "./auth.server";
 import { auditStatement } from "./db.server";
 import { loginCodeEmail } from "./email/login-code";
-import { scannerLoginCodeEmail } from "./email/scanner-login";
-import { sendDirectEmail, type EmailConfig } from "./email/send.server";
+import type { OrbitEmailConfig } from "./config.server";
 
 /**
  * One-time login PINs for /admin.
@@ -13,15 +12,7 @@ import { sendDirectEmail, type EmailConfig } from "./email/send.server";
  *    bypass it (same pattern as the quota check).
  *  - Unknown emails get the same answer as admins and no email (no admin enumeration).
  */
-/**
- * Two logins share this mechanism with separate tables: the admin dashboard (`admins`) and the scanner app
- * (`scanners`, active only). The table names below are constants, never user input.
- */
-export type LoginRealm = "admin" | "scanner";
-const REALM_SQL: Record<LoginRealm, { codes: string; member: string }> = {
-  admin: { codes: "admin_login_codes", member: "SELECT 1 FROM admins WHERE email = ?1" },
-  scanner: { codes: "scanner_login_codes", member: "SELECT 1 FROM scanners WHERE email = ?1 AND active = 1" },
-};
+const LOGIN_CODE_TABLE = "admin_login_codes";
 
 export const CODE_TTL_MS = 10 * 60_000;
 export const CODE_MAX_ATTEMPTS = 5;
@@ -56,13 +47,11 @@ export type RequestCodeResult =
 
 export async function requestLoginCode(
   db: D1Database,
-  cfg: EmailConfig,
+  cfg: OrbitEmailConfig,
   emailRaw: string,
   meta: RequestMeta & { appOrigin: string },
   now = new Date(),
-  realm: LoginRealm = "admin",
 ): Promise<RequestCodeResult> {
-  const tables = REALM_SQL[realm];
   const email = normalizeEmail(emailRaw);
   if (!isValidEmail(email)) return { status: "skipped" };
 
@@ -73,11 +62,11 @@ export async function requestLoginCode(
 
   const row = await db
     .prepare(
-      `INSERT INTO ${tables.codes} (email, code_hash, salt, created_at, expires_at, ip)
+      `INSERT INTO ${LOGIN_CODE_TABLE} (email, code_hash, salt, created_at, expires_at, ip)
        SELECT ?1, ?2, ?3, ?4, ?5, ?6
-       WHERE EXISTS (${tables.member})
-         AND NOT EXISTS (SELECT 1 FROM ${tables.codes} WHERE email = ?1 AND created_at > ?7)
-         AND (SELECT COUNT(*) FROM ${tables.codes} WHERE email = ?1 AND created_at > ?8) < ?9
+      WHERE EXISTS (SELECT 1 FROM admins WHERE email = ?1)
+        AND NOT EXISTS (SELECT 1 FROM ${LOGIN_CODE_TABLE} WHERE email = ?1 AND created_at > ?7)
+        AND (SELECT COUNT(*) FROM ${LOGIN_CODE_TABLE} WHERE email = ?1 AND created_at > ?8) < ?9
        RETURNING id`,
     )
     .bind(
@@ -94,18 +83,7 @@ export async function requestLoginCode(
     .first<{ id: number }>();
   if (!row) return { status: "skipped" };
 
-  const { subject, html, text } =
-    realm === "scanner"
-      ? scannerLoginCodeEmail({
-          code,
-          email,
-          requestedAt: nowIso,
-          expiresAt,
-          validMinutes: CODE_TTL_MS / 60_000,
-          appOrigin: meta.appOrigin,
-          userAgent: meta.userAgent,
-        })
-      : loginCodeEmail({
+  const { subject, html, text } = loginCodeEmail({
     code,
     email,
     requestedAt: nowIso,
@@ -118,15 +96,42 @@ export async function requestLoginCode(
   });
 
   try {
-    await sendDirectEmail(db, cfg, { to: email, subject, html, text, attachments: [] }, {
-      kind: realm === "scanner" ? "scanner_login_code" : "login_code",
-      idempotencyKey: `login-code:${row.id}:${salt}`,
-    });
+    if (cfg.mode === "log") {
+      await db
+        .prepare(
+          `INSERT INTO dev_outbox (created_at, kind, to_address, subject, html, attachments_json)
+           VALUES (?, 'login_code', ?, ?, ?, '[]')`,
+        )
+        .bind(nowIso, email, subject, html)
+        .run();
+    } else {
+      if (!cfg.resendApiKey) throw new Error("RESEND_API_KEY is not configured.");
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${cfg.resendApiKey}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": `login-code:${row.id}:${salt}`,
+        },
+        body: JSON.stringify({
+          from: cfg.from,
+          to: [email],
+          reply_to: cfg.replyTo,
+          subject,
+          html,
+          text,
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { message?: string };
+        throw new Error(`Resend ${response.status}: ${body.message ?? "unknown error"}`);
+      }
+    }
   } catch (err) {
     const error = String((err as Error)?.message ?? err).slice(0, 300);
     // Drop the undelivered code so the cooldown does not block an immediate retry.
     await db.batch([
-      db.prepare(`DELETE FROM ${tables.codes} WHERE id = ?`).bind(row.id),
+      db.prepare(`DELETE FROM ${LOGIN_CODE_TABLE} WHERE id = ?`).bind(row.id),
       auditStatement(db, email, "auth.code_failed", null, { error }, nowIso),
     ]);
     console.error(`login code for ${email} failed: ${error}`);
@@ -138,10 +143,10 @@ export async function requestLoginCode(
   return { status: "sent", codeId: row.id };
 }
 
-/** `code` is a stable machine-readable reason (the scanner app shows its own Indonesian/Dutch texts for it). */
+/** `code` is a stable machine-readable verification result. */
 export type VerifyCodeResult = { ok: true } | { ok: false; message: string; code?: "format" | "invalid" | "locked" };
 
-const INVALID = "Kode salah atau sudah kedaluwarsa. Periksa kembali, atau minta kode baru.";
+const INVALID = "The code is incorrect or expired. Check it and try again, or request a new code.";
 
 /**
  * Check a code. Every check of the live code costs one attempt (counted before comparing, in one conditional
@@ -152,12 +157,11 @@ export async function verifyLoginCode(
   emailRaw: string,
   codeRaw: string,
   now = new Date(),
-  realm: LoginRealm = "admin",
 ): Promise<VerifyCodeResult> {
-  const table = REALM_SQL[realm].codes;
+  const table = LOGIN_CODE_TABLE;
   const email = normalizeEmail(emailRaw);
   const code = normalizeCode(codeRaw);
-  if (!code) return { ok: false, message: "Masukkan 6 digit kode dari email.", code: "format" };
+  if (!code) return { ok: false, message: "Enter the six-digit code from the email.", code: "format" };
   const nowIso = now.toISOString();
 
   const row = await db
@@ -174,7 +178,7 @@ export async function verifyLoginCode(
   if (!timingSafeEqual(await hashCode(row.salt, code), row.code_hash)) {
     if (row.attempts >= CODE_MAX_ATTEMPTS) {
       await auditStatement(db, email, "auth.code_locked", null, undefined, nowIso).run();
-      return { ok: false, message: "Terlalu banyak percobaan. Minta kode baru untuk masuk.", code: "locked" };
+      return { ok: false, message: "Too many attempts. Request a new code to sign in.", code: "locked" };
     }
     return { ok: false, message: INVALID, code: "invalid" };
   }

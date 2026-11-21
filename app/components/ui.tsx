@@ -41,16 +41,13 @@ export function Spinner({ className = "size-4" }: { className?: string }) {
   );
 }
 
-/** PPME logo. Links to the association website. */
+/** ORBIT wordmark used on authentication and error screens. */
 export function Logo({ className = "h-11 w-auto sm:h-14" }: { className?: string }) {
   return (
-    <a
-      href="https://www.ppmedenhaag.nl/"
-      aria-label="PPME Den Haag – website"
-      className="shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-4"
-    >
-      <img src="/logo-ppme.png" alt="PPME Den Haag" width={135} height={70} className={className} />
-    </a>
+    <div role="img" aria-label="ORBIT — Organisation Records & Business Intelligence Toolkit" className={`inline-flex items-center gap-3 ${className}`}>
+      <span className="flex aspect-square h-full items-center justify-center rounded-full border-2 border-brand font-semibold text-brand" aria-hidden="true">O</span>
+      <span className="font-semibold tracking-[0.16em] text-slate-800">ORBIT</span>
+    </div>
   );
 }
 

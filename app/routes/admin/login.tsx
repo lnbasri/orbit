@@ -25,21 +25,21 @@ import { CODE_COOLDOWN_MS, CODE_TTL_MS, isValidEmail, requestLoginCode, verifyLo
 import { verifyTurnstile } from "~/lib/turnstile.server";
 
 export function meta() {
-  return [{ title: "Masuk – Dashboard Panitia PPME Den Haag" }, { name: "robots", content: "noindex" }];
+  return [{ title: "Sign in — ORBIT" }, { name: "robots", content: "noindex" }];
 }
 
 const GOOGLE_ERRORS: Record<string, string> = {
-  google_cancelled: "Masuk dengan Google dibatalkan.",
-  google_state: "Sesi masuk dengan Google sudah kedaluwarsa. Silakan coba lagi.",
-  google_exchange: "Google tidak dapat memverifikasi permintaan ini. Silakan coba lagi.",
-  google_token: "Tanda masuk dari Google tidak valid. Silakan coba lagi.",
-  google_unverified: "Alamat email akun Google ini belum terverifikasi oleh Google.",
-  google_not_admin: "Akun Google ini tidak terdaftar sebagai admin panitia.",
+  google_cancelled: "Google sign-in was cancelled.",
+  google_state: "The Google sign-in session expired. Please try again.",
+  google_exchange: "Google could not verify the request. Please try again.",
+  google_token: "The Google sign-in token is invalid. Please try again.",
+  google_unverified: "Google has not verified this email address.",
+  google_not_admin: "This Google account is not an ORBIT administrator.",
 };
 
 function gate() {
   const env = getAppEnv();
-  if (!featureEnabled(env, "admin")) throw data("Tidak ditemukan.", { status: 404 });
+  if (!featureEnabled(env, "admin")) throw data("Not found.", { status: 404 });
   return env;
 }
 
@@ -66,19 +66,19 @@ type ActionData =
 
 export async function action({ request, url }: Route.ActionArgs) {
   const env = gate();
-  if (!isSameOrigin(request)) throw data("Permintaan ditolak.", { status: 403 });
+  if (!isSameOrigin(request)) throw data("Request denied.", { status: 403 });
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
   const email = normalizeEmail(String(form.get("email") ?? ""));
   const next = safeNextPath(String(form.get("next") ?? ""));
 
   if (!isValidEmail(email)) {
-    return data<ActionData>({ step: "email", email, error: "Masukkan alamat email yang valid." }, { status: 400 });
+    return data<ActionData>({ step: "email", email, error: "Enter a valid email address." }, { status: 400 });
   }
 
   if (intent === "request") {
-    // Every code request needs a Turnstile pass (email form and "Kirim ulang"): bots cannot make us send mail,
-    // which would burn the Resend quota that registration emails depend on. Fails closed without a secret.
+    // Every code request needs a Turnstile pass (including resend): bots cannot make us send mail,
+    // Fails closed without a secret and prevents automated login-code requests.
     const resend = form.get("resend") === "1";
     const turnstile = await verifyTurnstile(
       env.TURNSTILE_SECRET,
@@ -87,7 +87,7 @@ export async function action({ request, url }: Route.ActionArgs) {
     );
     if (!turnstile.success) {
       console.error("login turnstile failed:", turnstile.errorCodes.join(",") || "unknown");
-      const error = "Verifikasi keamanan gagal atau kedaluwarsa. Silakan selesaikan verifikasi lalu coba lagi.";
+      const error = "Security verification failed or expired. Please complete it and try again.";
       return data<ActionData>(
         resend
           ? { step: "code", email, sentAt: Number(form.get("sentAt")) || Date.now(), error }
@@ -110,14 +110,14 @@ export async function action({ request, url }: Route.ActionArgs) {
     const session = await createSession(env.DB, email, "pin", requestMeta(request));
     if (!session) {
       return data<ActionData>(
-        { step: "email", email, error: "Email ini tidak lagi terdaftar sebagai admin panitia." },
+        { step: "email", email, error: "This email is no longer registered as an ORBIT administrator." },
         { status: 403 },
       );
     }
     throw redirect(next, { headers: { "Set-Cookie": sessionCookie(request, session.token) } });
   }
 
-  throw data("Permintaan tidak dikenal.", { status: 400 });
+  throw data("Unknown request.", { status: 400 });
 }
 
 export default function Login({ loaderData }: Route.ComponentProps) {
@@ -133,10 +133,10 @@ export default function Login({ loaderData }: Route.ComponentProps) {
             <div className="min-w-0">
               <Eyebrow className="flex items-center gap-2 text-brand">
                 <span className="inline-block size-1.5 rounded-full bg-brand" aria-hidden="true" />
-                Dashboard Panitia
+                ORBIT · Organisation toolkit
               </Eyebrow>
               <h1 className="text-gradient-brand mt-2.5 text-[1.75rem] leading-tight font-bold tracking-tight">
-                {step ? "Masukkan kode" : "Masuk"}
+                {step ? "Enter your code" : "Sign in"}
               </h1>
             </div>
             <Logo className="h-10 w-auto sm:h-12" />
@@ -167,14 +167,14 @@ export default function Login({ loaderData }: Route.ComponentProps) {
             )}
             {loaderData.devLog ? (
               <Callout tone="warning" icon={WrenchScrewdriverIcon} className="mt-6 text-[13px]">
-                Mode lokal: email tidak dikirim. Kode masuk tampil di terminal <code>npm run dev</code>.
+                Local mode: email is not sent. The sign-in code appears in the <code>npm run dev</code> terminal.
               </Callout>
             ) : null}
           </div>
 
           <footer className="flex items-start gap-2.5 border-t border-slate-200/80 bg-slate-50/70 px-6 py-4 text-xs leading-relaxed text-slate-500 sm:px-8">
             <LockClosedIcon className="mt-px size-4 shrink-0 text-slate-400" aria-hidden="true" />
-            <p>Khusus panitia Kajian PPME Den Haag. Setelah masuk, sesi Anda berlaku 24 jam di perangkat ini.</p>
+            <p>Restricted to authorised ORBIT administrators. Your session lasts 24 hours on this device.</p>
           </footer>
         </div>
       </main>
@@ -206,12 +206,11 @@ function EmailStep({
   const [token, setToken] = useState<string | null>(null);
   return (
     <div className="space-y-6">
-      {loggedOut ? <Notice result={{ ok: true, message: "Anda telah keluar dari Dashboard Panitia." }} /> : null}
+      {loggedOut ? <Notice result={{ ok: true, message: "You have signed out of ORBIT." }} /> : null}
       {error ? <Notice result={{ ok: false, message: error }} /> : null}
 
       <p className="text-[15px] leading-relaxed text-slate-600">
-        Masukkan email panitia Anda. Kami akan mengirimkan <span className="font-semibold text-slate-900">kode masuk 6 digit</span> ke
-        alamat tersebut.
+        Enter your administrator email. We will send a <span className="font-semibold text-slate-900">six-digit sign-in code</span> to that address.
       </p>
 
       {google ? (
@@ -221,11 +220,11 @@ function EmailStep({
             className={buttonClass("secondary", "lg", "w-full")}
           >
             <GoogleMark className="size-5" />
-            Masuk dengan Google
+            Sign in with Google
           </a>
           <div className="flex items-center gap-3 text-[11px] font-semibold tracking-[0.14em] text-slate-400 uppercase">
             <span className="h-px flex-1 bg-slate-200" aria-hidden="true" />
-            atau dengan kode email
+            or use an email code
             <span className="h-px flex-1 bg-slate-200" aria-hidden="true" />
           </div>
         </>
@@ -241,7 +240,7 @@ function EmailStep({
           icon={EnvelopeIcon}
           autoComplete="email"
           inputMode="email"
-          placeholder="nama@contoh.com"
+          placeholder="name@example.com"
           defaultValue={defaultEmail}
           required
           autoFocus
@@ -250,12 +249,12 @@ function EmailStep({
           <Turnstile siteKey={siteKey} resetKey={error ?? undefined} onToken={setToken} />
         ) : (
           <Callout tone="danger" icon={ExclamationTriangleIcon} className="text-[13px]">
-            Verifikasi keamanan (Turnstile) belum dikonfigurasi di server ini, sehingga kode masuk tidak dapat dikirim.
+            Turnstile security verification is not configured on this server, so a sign-in code cannot be sent.
           </Callout>
         )}
         <button type="submit" disabled={busy || !token} className={buttonClass("primary", "lg", "w-full")}>
           {busy ? <Spinner /> : null}
-          {busy ? "Mengirim kode…" : "Kirim kode masuk"}
+          {busy ? "Sending code…" : "Send sign-in code"}
           {busy ? null : <ArrowRightIcon className="size-4" aria-hidden="true" />}
         </button>
       </Form>
@@ -299,14 +298,14 @@ function CodeStep({
     <div className="space-y-6">
       <Callout tone="info" icon={EnvelopeIcon}>
         <p>
-          Jika <span className="font-semibold break-all text-slate-900">{email}</span> terdaftar sebagai admin panitia,
-          kode masuk telah dikirim ke alamat tersebut. Kode berlaku {validMinutes} menit.
+          If <span className="font-semibold break-all text-slate-900">{email}</span> is registered as an ORBIT administrator,
+          a sign-in code has been sent to that address. The code is valid for {validMinutes} minutes.
         </p>
-        <p className="text-slate-500">Tidak ada di kotak masuk? Periksa folder spam atau promosi.</p>
+        <p className="text-slate-500">Not in your inbox? Check your spam or promotions folder.</p>
       </Callout>
 
       {resent && !error ? (
-        <Notice result={{ ok: true, message: "Kode baru telah diminta. Kode sebelumnya tidak berlaku lagi." }} />
+        <Notice result={{ ok: true, message: "A new code was requested. The previous code is no longer valid." }} />
       ) : null}
       {error ? <Notice result={{ ok: false, message: error }} /> : null}
 
@@ -316,7 +315,7 @@ function CodeStep({
         <input type="hidden" name="next" value={next} />
         <input type="hidden" name="sentAt" value={sentAt} />
         <Field>
-          <Label className="mb-1.5 block text-sm font-medium text-slate-700">Kode masuk</Label>
+          <Label className="mb-1.5 block text-sm font-medium text-slate-700">Sign-in code</Label>
           <Input
             name="code"
             required
@@ -336,7 +335,7 @@ function CodeStep({
         </Field>
         <button type="submit" disabled={verifying} className={buttonClass("primary", "lg", "w-full")}>
           {verifying ? <Spinner /> : null}
-          {verifying ? "Memeriksa kode…" : "Masuk"}
+          {verifying ? "Checking code…" : "Sign in"}
           {verifying ? null : <ArrowRightIcon className="size-4" aria-hidden="true" />}
         </button>
       </Form>
@@ -347,7 +346,7 @@ function CodeStep({
           className={buttonClass("ghost", "sm", "-ml-3")}
         >
           <ArrowLeftIcon className="size-4" aria-hidden="true" />
-          Ganti email
+          Change email
         </Link>
         <Form method="post" className="flex flex-col items-end gap-2">
           <input type="hidden" name="intent" value="request" />
@@ -361,7 +360,7 @@ function CodeStep({
           ) : null}
           <button type="submit" disabled={wait > 0 || resending || !token} className={buttonClass("secondary", "sm")}>
             {resending ? <Spinner /> : <ArrowPathIcon className="size-4" aria-hidden="true" />}
-            {wait > 0 ? `Kirim ulang (${wait} dtk)` : "Kirim ulang kode"}
+            {wait > 0 ? `Resend (${wait}s)` : "Resend code"}
           </button>
         </Form>
       </div>

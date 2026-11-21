@@ -8,20 +8,18 @@ import {
   ShieldCheckIcon,
   TrashIcon,
   UserIcon,
-  UserMinusIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
-import { ActionButton, Notice, PageHeader, Panel } from "~/components/admin";
+import { Notice, PageHeader, Panel } from "~/components/admin";
 import { TextField } from "~/components/forms";
 import { Spinner, buttonClass } from "~/components/ui";
-import { handleAdminIntent } from "~/lib/admin-actions.server";
 import { adminEmailContext } from "~/lib/admin-context";
-import { listAdmins } from "~/lib/admins.server";
+import { addAdmin, listAdmins, removeAdmin } from "~/lib/admins.server";
 import { getAppEnv } from "~/lib/env.server";
 import { formatDateTime } from "~/lib/format";
 
 export function meta() {
-  return [{ title: "Kelola Admin – PPME Den Haag" }, { name: "robots", content: "noindex" }];
+  return [{ title: "Manage access — ORBIT" }, { name: "robots", content: "noindex" }];
 }
 
 export async function loader({ context }: Route.LoaderArgs) {
@@ -29,7 +27,16 @@ export async function loader({ context }: Route.LoaderArgs) {
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
-  return handleAdminIntent(getAppEnv(), context.get(adminEmailContext), await request.formData());
+  const form = await request.formData();
+  const intent = String(form.get("intent") ?? "");
+  const actor = context.get(adminEmailContext);
+  if (intent === "add-admin") {
+    return addAdmin(getAppEnv().DB, actor, String(form.get("email") ?? ""), String(form.get("name") ?? ""));
+  }
+  if (intent === "remove-admin") {
+    return removeAdmin(getAppEnv().DB, actor, String(form.get("email") ?? ""));
+  }
+  return { ok: false, message: "Unknown action." };
 }
 
 export default function Admins({ loaderData }: Route.ComponentProps) {
@@ -45,17 +52,17 @@ export default function Admins({ loaderData }: Route.ComponentProps) {
   return (
     <div>
       <PageHeader
-        eyebrow="Akses"
+        eyebrow="Access"
         title={
           <>
-            Kelola admin <span className="text-slate-400 tabular-nums">({admins.length})</span>
+            Manage administrators <span className="text-slate-400 tabular-nums">({admins.length})</span>
           </>
         }
-        description="Hanya orang dalam daftar ini yang dapat membuka dashboard panitia. Perubahan berlaku seketika."
+        description="Only people on this list can access ORBIT. Changes take effect immediately."
       />
 
       <div className="space-y-6">
-        <Panel title="Tambah admin" icon={UserPlusIcon}>
+        <Panel title="Add administrator" icon={UserPlusIcon}>
           <fetcher.Form ref={formRef} method="post" className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
             <input type="hidden" name="intent" value="add-admin" />
             <TextField
@@ -69,25 +76,25 @@ export default function Admins({ loaderData }: Route.ComponentProps) {
             />
             <TextField
               name="name"
-              label="Nama (opsional)"
+              label="Name (optional)"
               icon={UserIcon}
               maxLength={120}
               autoComplete="off"
-              placeholder="Nama panitia"
+              placeholder="Administrator"
             />
             <button type="submit" disabled={busy} className={buttonClass("primary", "md")}>
               {busy ? <Spinner /> : <UserPlusIcon className="size-4" aria-hidden="true" />}
-              {busy ? "Menyimpan…" : "Tambah"}
+              {busy ? "Saving…" : "Add"}
             </button>
           </fetcher.Form>
           <Notice result={fetcher.data} className="mt-4" />
           <p className="mt-4 flex items-start gap-2 text-xs text-slate-500">
             <InformationCircleIcon className="size-4 shrink-0" aria-hidden="true" />
-            Orang yang ditambahkan masuk dengan kode sekali pakai yang dikirim ke emailnya (atau dengan akun Google bila diaktifkan). Menghapus admin langsung mengakhiri sesinya.
+            Administrators sign in with a one-time email code or Google (when enabled). Removing an administrator ends their sessions immediately.
           </p>
         </Panel>
 
-        <Panel title="Daftar admin" icon={ShieldCheckIcon} flush>
+        <Panel title="Administrator list" icon={ShieldCheckIcon} flush>
           <ul className="divide-y divide-slate-100">
             {admins.map((a) => (
               <li key={a.email} className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-4 sm:px-5">
@@ -102,37 +109,38 @@ export default function Admins({ loaderData }: Route.ComponentProps) {
                     <span className="font-semibold break-all text-slate-900">{a.email}</span>
                     {a.email === me ? (
                       <span className="rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-semibold text-brand ring-1 ring-brand-200 ring-inset">
-                        Anda
+                        You
                       </span>
                     ) : null}
                   </div>
                   {a.name ? <div className="text-sm text-slate-600">{a.name}</div> : null}
                   <div className="mt-0.5 text-xs text-slate-500">
-                    Ditambahkan {formatDateTime(a.added_at)} oleh {a.added_by} · login terakhir{" "}
-                    {a.last_login_at ? formatDateTime(a.last_login_at) : "belum pernah"}
+                    Added {formatDateTime(a.added_at)} by {a.added_by} · last login{" "}
+                    {a.last_login_at ? formatDateTime(a.last_login_at) : "never"}
                   </div>
                 </div>
                 {a.email === me ? null : (
-                  <ActionButton
-                    intent="remove-admin"
-                    label="Hapus"
-                    tone="neutral"
-                    icon={TrashIcon}
-                    extra={{ email: a.email }}
-                    confirm={{
-                      title: "Hapus admin",
-                      description: `${a.email} akan dihapus dari daftar admin dan tidak bisa lagi membuka dashboard panitia.`,
-                      confirmLabel: "Ya, hapus",
-                      tone: "danger",
-                      icon: UserMinusIcon,
-                    }}
-                  />
+                  <fetcher.Form method="post" className="flex items-center gap-2">
+                    <input type="hidden" name="intent" value="remove-admin" />
+                    <input type="hidden" name="email" value={a.email} />
+                    <button
+                      type="submit"
+                      onClick={(event) => {
+                        if (!window.confirm(`Remove ${a.email} from ORBIT administrators?`)) event.preventDefault();
+                      }}
+                      disabled={busy}
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-[13px] font-semibold text-slate-700 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                    >
+                      <TrashIcon className="size-4" aria-hidden="true" />
+                      Remove
+                    </button>
+                  </fetcher.Form>
                 )}
               </li>
             ))}
           </ul>
           <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500 sm:px-5">
-            Anda tidak dapat menghapus diri sendiri, dan admin terakhir tidak dapat dihapus.
+            You cannot remove yourself, and the last administrator cannot be removed.
           </p>
         </Panel>
       </div>

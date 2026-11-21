@@ -51,13 +51,13 @@ export function AdminHeader({
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:gap-6">
         <Link
           to="/admin"
-          aria-label="Dashboard Panitia – beranda"
+          aria-label="ORBIT — home"
           className="flex shrink-0 items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-4"
         >
-          <img src="/logo-ppme.png" alt="PPME Den Haag" width={135} height={70} className="h-8 w-auto sm:h-9" />
+          <span className="flex size-9 items-center justify-center rounded-full border-2 border-brand font-semibold text-brand" aria-hidden="true">O</span>
           <span className="h-6 w-px bg-slate-200 lg:hidden xl:block" aria-hidden="true" />
           <span className="text-sm font-semibold whitespace-nowrap text-slate-900 lg:hidden xl:inline">
-            Dashboard Panitia
+            ORBIT
           </span>
         </Link>
 
@@ -103,11 +103,11 @@ export function AdminHeader({
             <button
               type="submit"
               form={LOGOUT_FORM}
-              title="Keluar"
+              title="Sign out"
               className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200/80 bg-white/80 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
             >
               <ArrowRightStartOnRectangleIcon className="size-4" aria-hidden="true" />
-              <span className="sr-only">Keluar</span>
+              <span className="sr-only">Sign out</span>
             </button>
           ) : null}
         </div>
@@ -115,7 +115,7 @@ export function AdminHeader({
         {/* below lg: dropdown menu */}
         <Menu as="div" className="ml-auto lg:hidden">
           <MenuButton
-            aria-label={`Menu navigasi (halaman: ${current.label})`}
+            aria-label={`Navigation menu (page: ${current.label})`}
             className="group relative inline-flex size-11 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 shadow-xs transition hover:border-slate-400 hover:text-slate-900 focus:outline-none data-active:bg-slate-50 data-focus:ring-4 data-focus:ring-brand/15 data-open:border-brand data-open:bg-brand-50 data-open:text-brand"
           >
             <Bars3Icon
@@ -136,7 +136,7 @@ export function AdminHeader({
             <div className="flex items-start gap-2.5 px-3 pt-2.5 pb-3">
               <UserCircleIcon className="size-8 shrink-0 text-slate-300" aria-hidden="true" />
               <div className="min-w-0">
-                <div className="text-[11px] font-semibold tracking-[0.12em] text-slate-500 uppercase">Masuk sebagai</div>
+                <div className="text-[11px] font-semibold tracking-[0.12em] text-slate-500 uppercase">Signed in as</div>
                 <div className="text-sm font-medium break-all text-slate-900">{email}</div>
                 {dev ? <DevBadge className="mt-1.5" /> : null}
               </div>
@@ -171,7 +171,7 @@ export function AdminHeader({
                     className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-red-50 data-focus:text-red-700"
                   >
                     <ArrowRightStartOnRectangleIcon className="size-5 text-slate-400" aria-hidden="true" />
-                    Keluar
+                    Sign out
                   </button>
                 </MenuItem>
               </>
@@ -189,7 +189,7 @@ function DevBadge({ className = "" }: { className?: string }) {
       className={`inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium whitespace-nowrap text-amber-800 ring-1 ring-amber-600/20 ring-inset ${className}`}
     >
       <WrenchScrewdriverIcon className="size-3.5" aria-hidden="true" />
-      Mode lokal
+      Local mode
     </span>
   );
 }

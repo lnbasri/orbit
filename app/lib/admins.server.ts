@@ -65,7 +65,7 @@ export async function addAdmin(
   now = new Date(),
 ): Promise<AdminResult> {
   const email = normalizeEmail(emailRaw);
-  if (!EMAIL_RE.test(email)) return { ok: false, message: "Format email tidak valid." };
+  if (!EMAIL_RE.test(email)) return { ok: false, message: "Enter a valid email address." };
   const name = nameRaw.trim().slice(0, 120) || null;
   const nowIso = now.toISOString();
 
@@ -73,10 +73,10 @@ export async function addAdmin(
     .prepare("INSERT OR IGNORE INTO admins (email, name, added_by, added_at) VALUES (?, ?, ?, ?)")
     .bind(email, name, normalizeEmail(actor), nowIso)
     .run();
-  if ((res.meta.changes ?? 0) !== 1) return { ok: false, message: `${email} sudah menjadi admin.` };
+  if ((res.meta.changes ?? 0) !== 1) return { ok: false, message: `${email} is already an administrator.` };
 
   await auditStatement(db, actor, "admin.add", email, name ? { name } : undefined, nowIso).run();
-  return { ok: true, message: `${email} ditambahkan sebagai admin.` };
+  return { ok: true, message: `${email} was added as an administrator.` };
 }
 
 /**
@@ -91,7 +91,7 @@ export async function removeAdmin(
 ): Promise<AdminResult> {
   const email = normalizeEmail(emailRaw);
   if (email === normalizeEmail(actor)) {
-    return { ok: false, message: "Anda tidak dapat menghapus diri sendiri. Minta admin lain melakukannya." };
+    return { ok: false, message: "You cannot remove yourself. Ask another administrator." };
   }
   const res = await db
     .prepare("DELETE FROM admins WHERE email = ? AND (SELECT COUNT(*) FROM admins) > 1")
@@ -101,7 +101,7 @@ export async function removeAdmin(
     const exists = await db.prepare("SELECT 1 AS ok FROM admins WHERE email = ?").bind(email).first();
     return {
       ok: false,
-      message: exists ? "Admin terakhir tidak dapat dihapus." : `${email} bukan admin.`,
+      message: exists ? "The last administrator cannot be removed." : `${email} is not an administrator.`,
     };
   }
   // End their sessions too (the session lookup already requires an admins row; this keeps the table clean).
@@ -109,5 +109,5 @@ export async function removeAdmin(
     db.prepare("DELETE FROM admin_sessions WHERE email = ?").bind(email),
     auditStatement(db, actor, "admin.remove", email, undefined, now.toISOString()),
   ]);
-  return { ok: true, message: `${email} dihapus dari daftar admin.` };
+  return { ok: true, message: `${email} was removed from the administrator list.` };
 }
