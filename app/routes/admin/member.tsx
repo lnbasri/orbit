@@ -12,6 +12,7 @@ import {
   listGroups,
   listHouseholds,
   saveMember,
+  setMemberArchived,
 } from "~/lib/members.server";
 
 export async function loader({ params }: Route.LoaderArgs) {
@@ -70,6 +71,7 @@ export async function action({ request, context, params }: Route.ActionArgs) {
       groupIds,
       new Date(),
       Object.fromEntries(groupIds.map((groupId) => [groupId, String(form.get(`groupRole:${groupId}`) ?? "member")])),
+      String(form.get("householdRole") ?? "partner"),
     );
     return data(result, { status: result.ok ? 200 : 400 });
   }
@@ -85,6 +87,14 @@ export async function action({ request, context, params }: Route.ActionArgs) {
   }
   if (intent === "end-relationship") {
     const result = await endMemberRelationship(db, actor, id, String(form.get("relationshipId") ?? ""));
+    return data(result, { status: result.ok ? 200 : 400 });
+  }
+  if (intent === "archive-member") {
+    const result = await setMemberArchived(db, actor, id, true);
+    return data(result, { status: result.ok ? 200 : 400 });
+  }
+  if (intent === "restore-member") {
+    const result = await setMemberArchived(db, actor, id, false);
     return data(result, { status: result.ok ? 200 : 400 });
   }
   return data({ ok: false, message: "Unknown action." }, { status: 400 });

@@ -7,7 +7,12 @@ import { TextField } from "~/components/forms";
 import { buttonClass } from "~/components/ui";
 import { adminEmailContext } from "~/lib/admin-context";
 import { getAppEnv } from "~/lib/env.server";
-import { listHouseholds, saveHousehold } from "~/lib/members.server";
+import {
+  listHouseholds,
+  previewHouseholdLifecycle,
+  processHouseholdLifecycle,
+  saveHousehold,
+} from "~/lib/members.server";
 
 export function meta() {
   return [{ title: "Households — ORBIT" }, { name: "robots", content: "noindex" }];
@@ -19,7 +24,42 @@ export async function loader() {
 
 export async function action({ request, context }: Route.ActionArgs) {
   const form = await request.formData();
-  if (form.get("intent") !== "save-household") return data({ ok: false, message: "Unknown action." }, { status: 400 });
+  const intent = String(form.get("intent") ?? "");
+  if (intent === "preview-household-lifecycle" || intent === "process-household-lifecycle") {
+    const householdId = String(form.get("householdId") ?? "");
+    if (!householdId) return data({ ok: false, message: "Household not found." }, { status: 400 });
+    if (intent === "preview-household-lifecycle") {
+      try {
+        const preview = await previewHouseholdLifecycle(getAppEnv().DB, householdId);
+        return data(
+          {
+            ok: true,
+            message: `${preview.action}: ${preview.reason}`,
+          },
+          { status: 200 },
+        );
+      } catch (error) {
+        return data(
+          { ok: false, message: error instanceof Error ? error.message : "Lifecycle preview failed." },
+          { status: 400 },
+        );
+      }
+    }
+    try {
+      const result = await processHouseholdLifecycle(
+        getAppEnv().DB,
+        context.get(adminEmailContext),
+        householdId,
+      );
+      return data(result, { status: result.ok ? 200 : 400 });
+    } catch (error) {
+      return data(
+        { ok: false, message: error instanceof Error ? error.message : "Lifecycle process failed." },
+        { status: 400 },
+      );
+    }
+  }
+  if (intent !== "save-household") return data({ ok: false, message: "Unknown action." }, { status: 400 });
   const result = await saveHousehold(
     getAppEnv().DB,
     context.get(adminEmailContext),
@@ -73,6 +113,26 @@ export default function Households({ loaderData, actionData }: Route.ComponentPr
                   <TextField name="statusNote" label="Status note" maxLength={2000} defaultValue={household.status_note ?? ""} />
                   <button type="submit" className={`${buttonClass("secondary", "md")} self-end`}>Save household</button>
                 </Form>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Form method="post" className="inline-flex">
+                    <input type="hidden" name="intent" value="preview-household-lifecycle" />
+                    <input type="hidden" name="householdId" value={household.id} />
+                    <button type="submit" className={buttonClass("secondary", "sm")}>Preview lifecycle</button>
+                  </Form>
+                  <Form method="post" className="inline-flex">
+                    <input type="hidden" name="intent" value="process-household-lifecycle" />
+                    <input type="hidden" name="householdId" value={household.id} />
+                    <button
+                      type="submit"
+                      onClick={(event) => {
+                        if (!window.confirm(`Process household lifecycle for ${household.name}?`)) event.preventDefault();
+                      }}
+                      className={buttonClass("primary", "sm")}
+                    >
+                      Process lifecycle
+                    </button>
+                  </Form>
+                </div>
               </li>
             ))}
           </ul>

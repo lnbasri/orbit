@@ -21,13 +21,15 @@ export async function loader() {
     middle_name: null,
     family_name: null,
     date_of_birth: null,
-    gender: null,
+    gender: "male",
     address: null,
     postal_code: null,
     city: null,
     country: null,
     preferred_language: null,
     communication_consent: 0,
+    communication_consent_updated_at: null,
+    archived_at: null,
     email: null,
     phone: null,
     status: "active",
@@ -77,6 +79,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     groupIds,
     new Date(),
     Object.fromEntries(groupIds.map((groupId) => [groupId, String(form.get(`groupRole:${groupId}`) ?? "member")])),
+    String(form.get("householdRole") ?? "partner"),
   );
   if (result.ok) throw redirect(`/admin/members/${result.id}`);
   return result;

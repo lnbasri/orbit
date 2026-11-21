@@ -20,8 +20,10 @@ beforeAll(async () => {
 afterAll(async () => dispose?.());
 beforeEach(async () => {
   await resetDb(db);
-  await addAdmin(db, "system", "admin@x.nl", "Admin", T0);
-  await addAdmin(db, "system", "other@x.nl", "Other", T0);
+  await db.prepare("INSERT INTO admins (email, name, role, active, added_by, added_at) VALUES (?, ?, 'SUPER_ADMIN', 1, 'test', ?)")
+    .bind("admin@x.nl", "Admin", T0.toISOString())
+    .run();
+  await addAdmin(db, "admin@x.nl", "other@x.nl", "Other", "ADMIN", T0);
 });
 
 const at = (ms: number) => new Date(T0.getTime() + ms);

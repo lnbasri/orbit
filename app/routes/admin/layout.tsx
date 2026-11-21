@@ -8,8 +8,8 @@ import {
 } from "@heroicons/react/24/outline";
 
 import type { Route } from "./+types/layout";
-import { adminAuthMethodContext, adminEmailContext } from "~/lib/admin-context";
-import { ensureBootstrap, isAdmin, touchLogin } from "~/lib/admins.server";
+import { adminAuthMethodContext, adminEmailContext, adminRoleContext } from "~/lib/admin-context";
+import { ensureBootstrap, getAdmin, isAdmin, touchLogin } from "~/lib/admins.server";
 import { identifyUser, isSameOrigin, loginPath } from "~/lib/auth.server";
 import { featureEnabled, isDev } from "~/lib/config.server";
 import { getAppEnv } from "~/lib/env.server";
@@ -38,9 +38,17 @@ export const middleware: Route.MiddlewareFunction[] = [
     if (!(await isAdmin(env.DB, result.email))) {
       throw data(`Access denied. ${result.email} is not an ORBIT administrator.`, { status: 403 });
     }
+    const admin = await getAdmin(env.DB, result.email);
+    if (!admin && result.method !== "dev") {
+      throw data("Access denied.", { status: 403 });
+    }
+    if (path === "/admin/admins" && admin?.role !== "SUPER_ADMIN" && result.method !== "dev") {
+      throw data("Only super administrators can manage administrator access.", { status: 403 });
+    }
     await touchLogin(env.DB, result.email);
     context.set(adminEmailContext, result.email);
     context.set(adminAuthMethodContext, result.method);
+    context.set(adminRoleContext, result.method === "dev" ? "dev" : (admin?.role ?? "ADMIN"));
     const response = await next();
     // Admin pages hold personal data: never cache them in shared or browser caches.
     if (response instanceof Response) {

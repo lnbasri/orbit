@@ -23,7 +23,7 @@ export async function loader() {
     db.prepare("SELECT COUNT(*) AS count FROM members WHERE archived_at IS NULL AND status = 'active'").first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM members WHERE archived_at IS NULL AND status = 'inactive'").first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM households").first<{ count: number }>(),
-    db.prepare("SELECT COUNT(*) AS count FROM administrative_groups").first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM groups").first<{ count: number }>(),
   ]);
   return {
     members: members?.count ?? 0,
@@ -45,14 +45,14 @@ export default function OrbitDashboard({ loaderData }: Route.ComponentProps) {
       <StatGroup>
         <Stat icon={UsersIcon} label="Members" value={loaderData.members} sub={`${loaderData.activeMembers} active`} />
         <Stat icon={BuildingOffice2Icon} label="Households" value={loaderData.households} />
-        <Stat icon={RectangleGroupIcon} label="Administrative groups" value={loaderData.groups} />
+        <Stat icon={RectangleGroupIcon} label="Groups" value={loaderData.groups} />
         <Stat icon={UsersIcon} label="Inactive members" value={loaderData.inactiveMembers} />
       </StatGroup>
 
       <div className="grid gap-6 md:grid-cols-3">
         <QuickLink to="/admin/members" title="Members" description="Create and maintain member profiles and relationships." />
         <QuickLink to="/admin/households" title="Households" description="Maintain household details and connect members." />
-        <QuickLink to="/admin/groups" title="Administrative groups" description="Organise members into committees and working groups." />
+        <QuickLink to="/admin/groups" title="Groups" description="Organise members into committees, contribution lists and working groups." />
       </div>
       <Panel title="Building ORBIT">
         <p className="max-w-3xl text-sm leading-6 text-slate-600">

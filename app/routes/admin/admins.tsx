@@ -14,7 +14,7 @@ import { Notice, PageHeader, Panel } from "~/components/admin";
 import { TextField } from "~/components/forms";
 import { Spinner, buttonClass } from "~/components/ui";
 import { adminEmailContext } from "~/lib/admin-context";
-import { addAdmin, listAdmins, removeAdmin } from "~/lib/admins.server";
+import { addAdmin, listAdmins, removeAdmin, setAdminRole } from "~/lib/admins.server";
 import { getAppEnv } from "~/lib/env.server";
 import { formatDateTime } from "~/lib/format";
 
@@ -31,10 +31,17 @@ export async function action({ request, context }: Route.ActionArgs) {
   const intent = String(form.get("intent") ?? "");
   const actor = context.get(adminEmailContext);
   if (intent === "add-admin") {
-    return addAdmin(getAppEnv().DB, actor, String(form.get("email") ?? ""), String(form.get("name") ?? ""));
+    const role = String(form.get("role") ?? "ADMIN");
+    if (role !== "SUPER_ADMIN" && role !== "ADMIN") return { ok: false, message: "Unknown administrator role." };
+    return addAdmin(getAppEnv().DB, actor, String(form.get("email") ?? ""), String(form.get("name") ?? ""), role);
   }
   if (intent === "remove-admin") {
     return removeAdmin(getAppEnv().DB, actor, String(form.get("email") ?? ""));
+  }
+  if (intent === "set-admin-role") {
+    const role = String(form.get("role") ?? "");
+    if (role !== "SUPER_ADMIN" && role !== "ADMIN") return { ok: false, message: "Unknown administrator role." };
+    return setAdminRole(getAppEnv().DB, actor, String(form.get("email") ?? ""), role);
   }
   return { ok: false, message: "Unknown action." };
 }
@@ -63,7 +70,7 @@ export default function Admins({ loaderData }: Route.ComponentProps) {
 
       <div className="space-y-6">
         <Panel title="Add administrator" icon={UserPlusIcon}>
-          <fetcher.Form ref={formRef} method="post" className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <fetcher.Form ref={formRef} method="post" className="grid gap-3 sm:grid-cols-[1fr_1fr_12rem_auto] sm:items-end">
             <input type="hidden" name="intent" value="add-admin" />
             <TextField
               name="email"
@@ -82,6 +89,13 @@ export default function Admins({ loaderData }: Route.ComponentProps) {
               autoComplete="off"
               placeholder="Administrator"
             />
+            <label className="text-sm font-medium text-slate-700">
+              Role
+              <select name="role" defaultValue="ADMIN" className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/15">
+                <option value="ADMIN">Administrator</option>
+                <option value="SUPER_ADMIN">Super administrator</option>
+              </select>
+            </label>
             <button type="submit" disabled={busy} className={buttonClass("primary", "md")}>
               {busy ? <Spinner /> : <UserPlusIcon className="size-4" aria-hidden="true" />}
               {busy ? "Saving…" : "Add"}
@@ -114,27 +128,47 @@ export default function Admins({ loaderData }: Route.ComponentProps) {
                     ) : null}
                   </div>
                   {a.name ? <div className="text-sm text-slate-600">{a.name}</div> : null}
+                  <div className="mt-1 text-xs font-semibold text-brand">
+                    {a.role === "SUPER_ADMIN" ? "Super administrator" : "Administrator"}
+                  </div>
                   <div className="mt-0.5 text-xs text-slate-500">
                     Added {formatDateTime(a.added_at)} by {a.added_by} · last login{" "}
                     {a.last_login_at ? formatDateTime(a.last_login_at) : "never"}
                   </div>
                 </div>
                 {a.email === me ? null : (
-                  <fetcher.Form method="post" className="flex items-center gap-2">
-                    <input type="hidden" name="intent" value="remove-admin" />
-                    <input type="hidden" name="email" value={a.email} />
-                    <button
-                      type="submit"
-                      onClick={(event) => {
-                        if (!window.confirm(`Remove ${a.email} from ORBIT administrators?`)) event.preventDefault();
-                      }}
-                      disabled={busy}
-                      className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-[13px] font-semibold text-slate-700 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
-                    >
-                      <TrashIcon className="size-4" aria-hidden="true" />
-                      Remove
-                    </button>
-                  </fetcher.Form>
+                  <div className="flex items-center gap-2">
+                    <fetcher.Form method="post" className="flex items-center gap-2">
+                      <input type="hidden" name="intent" value="set-admin-role" />
+                      <input type="hidden" name="email" value={a.email} />
+                      <label className="sr-only" htmlFor={`role-${a.email}`}>Role for {a.email}</label>
+                      <select
+                        id={`role-${a.email}`}
+                        name="role"
+                        defaultValue={a.role}
+                        onChange={(event) => event.currentTarget.form?.requestSubmit()}
+                        className="min-h-9 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700"
+                      >
+                        <option value="ADMIN">Administrator</option>
+                        <option value="SUPER_ADMIN">Super administrator</option>
+                      </select>
+                    </fetcher.Form>
+                    <fetcher.Form method="post" className="flex items-center gap-2">
+                      <input type="hidden" name="intent" value="remove-admin" />
+                      <input type="hidden" name="email" value={a.email} />
+                      <button
+                        type="submit"
+                        onClick={(event) => {
+                          if (!window.confirm(`Remove ${a.email} from ORBIT administrators?`)) event.preventDefault();
+                        }}
+                        disabled={busy}
+                        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-[13px] font-semibold text-slate-700 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                      >
+                        <TrashIcon className="size-4" aria-hidden="true" />
+                        Remove
+                      </button>
+                    </fetcher.Form>
+                  </div>
                 )}
               </li>
             ))}

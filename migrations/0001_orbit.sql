@@ -1,6 +1,9 @@
 CREATE TABLE admins (
   email TEXT PRIMARY KEY CHECK (email = lower(email)),
   name TEXT,
+  role TEXT NOT NULL DEFAULT 'ADMIN'
+    CHECK (role IN ('SUPER_ADMIN', 'ADMIN')),
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
   added_by TEXT NOT NULL,
   added_at TEXT NOT NULL,
   last_login_at TEXT
@@ -58,13 +61,14 @@ CREATE TABLE members (
   middle_name TEXT,
   family_name TEXT,
   date_of_birth TEXT,
-  gender TEXT CHECK (gender IN ('male', 'female')),
+  gender TEXT NOT NULL CHECK (gender IN ('male', 'female')),
   address TEXT,
   postal_code TEXT,
   city TEXT,
   country TEXT,
   preferred_language TEXT,
   communication_consent INTEGER NOT NULL DEFAULT 0 CHECK (communication_consent IN (0, 1)),
+  communication_consent_updated_at TEXT,
   email TEXT,
   phone TEXT,
   status TEXT NOT NULL DEFAULT 'active'
@@ -82,6 +86,7 @@ CREATE INDEX idx_members_status ON members(status);
 CREATE TABLE households (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  head_member_id TEXT REFERENCES members(id),
   address TEXT,
   postal_code TEXT,
   city TEXT,
@@ -98,16 +103,19 @@ CREATE TABLE member_households (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   member_id TEXT NOT NULL REFERENCES members(id),
   household_id TEXT NOT NULL REFERENCES households(id),
-  role TEXT NOT NULL DEFAULT 'member',
+  role TEXT NOT NULL DEFAULT 'partner'
+    CHECK (role IN ('head', 'partner', 'child')),
   assigned_by TEXT NOT NULL,
   valid_from TEXT NOT NULL,
   valid_until TEXT,
   ended_by TEXT
 );
 CREATE UNIQUE INDEX uq_member_current_household ON member_households(member_id) WHERE valid_until IS NULL;
+CREATE UNIQUE INDEX uq_household_current_head ON member_households(household_id) WHERE valid_until IS NULL AND role = 'head';
+CREATE UNIQUE INDEX uq_household_current_partner ON member_households(household_id) WHERE valid_until IS NULL AND role = 'partner';
 CREATE INDEX idx_member_households_household ON member_households(household_id, valid_until);
 
-CREATE TABLE administrative_groups (
+CREATE TABLE groups (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
   description TEXT,
@@ -118,7 +126,7 @@ CREATE TABLE administrative_groups (
 CREATE TABLE member_group_memberships (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   member_id TEXT NOT NULL REFERENCES members(id),
-  group_id TEXT NOT NULL REFERENCES administrative_groups(id),
+  group_id TEXT NOT NULL REFERENCES groups(id),
   role TEXT NOT NULL DEFAULT 'member',
   assigned_by TEXT NOT NULL,
   valid_from TEXT NOT NULL,

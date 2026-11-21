@@ -4,9 +4,12 @@ import {
   addMemberRelationship,
   endMemberRelationship,
   listMembers,
+  previewHouseholdLifecycle,
+  processHouseholdLifecycle,
   saveGroup,
   saveHousehold,
   saveMember,
+  setMemberArchived,
 } from "../app/lib/members.server";
 import { resetDb, startDb } from "./helpers";
 
@@ -26,9 +29,9 @@ const memberInput = (fullName: string) => ({
   preferredName: "",
   firstName: fullName.split(" ")[0] ?? "",
   middleName: "",
-  familyName: fullName.split(" ").slice(1).join(" ") || "",
+  familyName: fullName.split(" ").slice(1).join(" ") || "Member",
   dateOfBirth: "",
-  gender: "",
+  gender: "male" as const,
   address: "",
   postalCode: "",
   city: "",
@@ -160,6 +163,197 @@ describe("member records", () => {
       { role: "member", valid_until: "2026-11-20T22:00:00.000Z", assigned_by: "admin@example.org", ended_by: "admin@example.org" },
       { role: "Chair", valid_until: "2026-11-21T10:00:00.000Z", assigned_by: "admin@example.org", ended_by: "admin@example.org" },
     ]);
+  });
+
+  it("validates birth dates and records communication consent and archive timestamps", async () => {
+    const future = new Date();
+    future.setUTCFullYear(future.getUTCFullYear() + 1);
+    const futureDate = future.toISOString().slice(0, 10);
+    expect(await saveMember(db, "admin@example.org", {
+      ...memberInput("Future Person"),
+      dateOfBirth: futureDate,
+    })).toMatchObject({ ok: false, message: "Date of birth cannot be in the future." });
+
+    const initial = await saveMember(db, "admin@example.org", {
+      ...memberInput("Consent Person"),
+      dateOfBirth: "1990-05-14",
+      communicationConsent: true,
+    }, undefined, "", [], new Date("2026-11-20T10:00:00.000Z"));
+    expect(initial.ok).toBe(true);
+    if (!initial.ok) return;
+
+    const consent = await db
+      .prepare("SELECT communication_consent, communication_consent_updated_at FROM members WHERE id = ?")
+      .bind(initial.id)
+      .first<{ communication_consent: number; communication_consent_updated_at: string }>();
+    expect(consent).toEqual({
+      communication_consent: 1,
+      communication_consent_updated_at: "2026-11-20T10:00:00.000Z",
+    });
+
+    await saveMember(db, "admin@example.org", {
+      ...memberInput("Consent Person"),
+      dateOfBirth: "1990-05-14",
+      communicationConsent: false,
+    }, initial.id, "", [], new Date("2026-11-21T10:00:00.000Z"));
+    expect(await db
+      .prepare("SELECT communication_consent, communication_consent_updated_at FROM members WHERE id = ?")
+      .bind(initial.id)
+      .first()).toEqual({
+        communication_consent: 0,
+        communication_consent_updated_at: "2026-11-21T10:00:00.000Z",
+      });
+
+    expect(await setMemberArchived(db, "admin@example.org", initial.id, true, new Date("2026-11-21T11:00:00.000Z"))).toMatchObject({ ok: true });
+    expect(await db.prepare("SELECT archived_at FROM members WHERE id = ?").bind(initial.id).first()).toEqual({
+      archived_at: "2026-11-21T11:00:00.000Z",
+    });
+    expect(await setMemberArchived(db, "admin@example.org", initial.id, false, new Date("2026-11-21T12:00:00.000Z"))).toMatchObject({ ok: true });
+  });
+
+  it("allows only one partner and permits multiple children in a household", async () => {
+    const household = await saveHousehold(
+      db,
+      "admin@example.org",
+      { name: "Cardinality household", address: "Main Street", postalCode: "1234 AB", city: "The Hague", country: "NL", status: "active", statusNote: "" },
+    );
+    expect(household.ok).toBe(true);
+    if (!household.ok) return;
+
+    const head = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("First Head"),
+      undefined,
+      household.id,
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "head",
+    );
+    const partner = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("First Partner"),
+      undefined,
+      household.id,
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "partner",
+    );
+    expect(head.ok && partner.ok).toBe(true);
+    if (!head.ok || !partner.ok) return;
+
+    expect(await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Second Partner"),
+      undefined,
+      household.id,
+      [],
+      new Date("2026-11-20T11:00:00.000Z"),
+      {},
+      "partner",
+    )).toMatchObject({ ok: false, message: "This household already has one partner." });
+
+    const firstChild = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("First Child"),
+      undefined,
+      household.id,
+      [],
+      new Date("2026-11-20T12:00:00.000Z"),
+      {},
+      "child",
+    );
+    const secondChild = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Second Child"),
+      undefined,
+      household.id,
+      [],
+      new Date("2026-11-20T12:00:00.000Z"),
+      {},
+      "child",
+    );
+    expect(firstChild.ok && secondChild.ok).toBe(true);
+  });
+
+  it("previews and processes household head replacement", async () => {
+    const household = await saveHousehold(
+      db,
+      "admin@example.org",
+      { name: "Lifecycle household", address: "Main Street", postalCode: "1234 AB", city: "The Hague", country: "NL", status: "active", statusNote: "" },
+    );
+    expect(household.ok).toBe(true);
+    if (!household.ok) return;
+
+    const head = await saveMember(
+      db,
+      "admin@example.org",
+      { ...memberInput("Deceased Head"), dateOfBirth: "1960-01-01" },
+      undefined,
+      household.id,
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "head",
+    );
+    const partner = await saveMember(
+      db,
+      "admin@example.org",
+      { ...memberInput("Active Partner"), dateOfBirth: "1962-02-02" },
+      undefined,
+      household.id,
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "partner",
+    );
+    expect(head.ok && partner.ok).toBe(true);
+    if (!head.ok || !partner.ok) return;
+
+    await saveMember(
+      db,
+      "admin@example.org",
+      { ...memberInput("Deceased Head"), dateOfBirth: "1960-01-01", status: "deceased", statusNote: "Deceased" },
+      head.id,
+      household.id,
+      [],
+      new Date("2026-11-21T10:00:00.000Z"),
+      {},
+      "head",
+    );
+
+    const preview = await previewHouseholdLifecycle(
+      db,
+      household.id,
+      new Date("2026-11-21T10:00:00.000Z"),
+    );
+    expect(preview).toMatchObject({
+      action: "PROMOTE_PARTNER",
+      currentHeadId: head.id,
+      replacementMemberId: partner.id,
+    });
+
+    const processed = await processHouseholdLifecycle(
+      db,
+      "admin@example.org",
+      household.id,
+      new Date("2026-11-21T10:00:00.000Z"),
+    );
+    expect(processed.ok).toBe(true);
+
+    expect(await db.prepare("SELECT head_member_id FROM households WHERE id = ?").bind(household.id).first()).toEqual({
+      head_member_id: partner.id,
+    });
+    expect(await db
+      .prepare("SELECT role FROM member_households WHERE household_id = ? AND member_id = ? AND valid_until IS NULL")
+      .bind(household.id, partner.id)
+      .first()).toEqual({ role: "head" });
   });
 
   it("records directed member relationships and ends them without deleting history", async () => {

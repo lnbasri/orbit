@@ -10,7 +10,7 @@ import { getAppEnv } from "~/lib/env.server";
 import { listGroups, saveGroup } from "~/lib/members.server";
 
 export function meta() {
-  return [{ title: "Administrative groups — ORBIT" }, { name: "robots", content: "noindex" }];
+  return [{ title: "Groups — ORBIT" }, { name: "robots", content: "noindex" }];
 }
 
 export async function loader() {
@@ -35,7 +35,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 export default function Groups({ loaderData, actionData }: Route.ComponentProps) {
   return (
     <div>
-      <PageHeader eyebrow="Organisation" title="Administrative groups" description="Maintain committees, boards, and other administrative groups." />
+      <PageHeader eyebrow="Organisation" title="Groups" description="Maintain committees, boards, contribution lists, and other member groups." />
       <Notice result={actionData} className="mb-5" />
       <Panel title="Add a group" icon={UserGroupIcon}>
         <GroupForm />
