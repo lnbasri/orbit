@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   addMemberRelationship,
   endMemberRelationship,
+  getHouseholdDetail,
   listMembers,
   previewHouseholdLifecycle,
   processHouseholdLifecycle,
@@ -257,6 +258,18 @@ describe("member records", () => {
       "partner",
     )).toMatchObject({ ok: false, message: "This household already has one partner." });
 
+    expect(await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Second Head"),
+      undefined,
+      household.id,
+      [],
+      new Date("2026-11-20T11:30:00.000Z"),
+      {},
+      "head",
+    )).toMatchObject({ ok: false, message: "This household already has one head." });
+
     const firstChild = await saveMember(
       db,
       "admin@example.org",
@@ -280,6 +293,46 @@ describe("member records", () => {
       "child",
     );
     expect(firstChild.ok && secondChild.ok).toBe(true);
+  });
+
+  it("returns household detail with current and former members", async () => {
+    const household = await saveHousehold(
+      db,
+      "admin@example.org",
+      { name: "Detail household", address: "Detail Street", postalCode: "1234 AB", city: "The Hague", country: "NL", status: "active", statusNote: "" },
+    );
+    expect(household.ok).toBe(true);
+    if (!household.ok) return;
+
+    const head = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Detail Head"),
+      undefined,
+      household.id,
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "head",
+    );
+    expect(head.ok).toBe(true);
+    if (!head.ok) return;
+
+    await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Detail Head"),
+      head.id,
+      "",
+      [],
+      new Date("2026-11-21T10:00:00.000Z"),
+      {},
+      "member",
+    );
+
+    const detail = await getHouseholdDetail(db, household.id);
+    expect(detail?.household.name).toBe("Detail household");
+    expect(detail?.formerMembers).toHaveLength(1);
   });
 
   it("previews and processes household head replacement", async () => {

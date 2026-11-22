@@ -25,7 +25,7 @@ export const middleware: Route.MiddlewareFunction[] = [
     const orbitPath =
       path === "/admin" ||
       /^\/admin\/members(?:\/(?:new|[A-Za-z0-9_-]+))?\/?$/.test(path) ||
-      /^\/admin\/(?:households|groups|admins)\/?$/.test(path);
+      /^\/admin\/(?:households(?:\/[A-Za-z0-9_-]+)?|groups|admins)\/?$/.test(path);
     if (!orbitPath || !featureEnabled(env, "admin")) throw data("Not found.", { status: 404 });
     if (request.method !== "GET" && request.method !== "HEAD" && !isSameOrigin(request)) {
       throw data("Request denied.", { status: 403 });

@@ -77,6 +77,27 @@ export interface HouseholdRow {
   member_count?: number;
 }
 
+export interface HouseholdMemberRow {
+  id: string;
+  full_name: string;
+  preferred_name: string | null;
+  email: string | null;
+  phone: string | null;
+  status: MemberStatus;
+  role: "head" | "partner" | "child";
+  valid_from: string;
+  valid_until: string | null;
+  date_of_birth: string | null;
+}
+
+export interface HouseholdAuditRow {
+  id: number;
+  at: string;
+  actor: string;
+  action: string;
+  detail: string | null;
+}
+
 export interface GroupRow {
   id: string;
   name: string;
@@ -248,6 +269,53 @@ export async function listHouseholds(db: D1Database) {
   return results;
 }
 
+export async function getHouseholdDetail(db: D1Database, id: string) {
+  const household = await db
+    .prepare("SELECT * FROM households WHERE id = ?")
+    .bind(id)
+    .first<HouseholdRow>();
+  if (!household) return null;
+
+  const [current, history, audit] = await Promise.all([
+    db
+      .prepare(
+        `SELECT m.id, m.full_name, m.preferred_name, m.email, m.phone, m.status,
+                m.date_of_birth, mh.role, mh.valid_from, mh.valid_until
+         FROM member_households mh
+         JOIN members m ON m.id = mh.member_id
+         WHERE mh.household_id = ? AND mh.valid_until IS NULL
+         ORDER BY CASE mh.role WHEN 'head' THEN 0 WHEN 'partner' THEN 1 ELSE 2 END,
+                  m.full_name COLLATE NOCASE`,
+      )
+      .bind(id)
+      .all<HouseholdMemberRow>(),
+    db
+      .prepare(
+        `SELECT m.id, m.full_name, m.preferred_name, m.email, m.phone, m.status,
+                m.date_of_birth, mh.role, mh.valid_from, mh.valid_until
+         FROM member_households mh
+         JOIN members m ON m.id = mh.member_id
+         WHERE mh.household_id = ? AND mh.valid_until IS NOT NULL
+         ORDER BY mh.valid_until DESC, m.full_name COLLATE NOCASE`,
+      )
+      .bind(id)
+      .all<HouseholdMemberRow>(),
+    db
+      .prepare(
+        "SELECT id, at, actor, action, detail FROM audit_log WHERE target = ? ORDER BY id DESC LIMIT 50",
+      )
+      .bind(id)
+      .all<HouseholdAuditRow>(),
+  ]);
+
+  return {
+    household,
+    currentMembers: current.results,
+    formerMembers: history.results,
+    audit: audit.results,
+  };
+}
+
 export async function listGroups(db: D1Database) {
   const { results } = await db
     .prepare(
@@ -331,6 +399,16 @@ export async function saveMember(
       .bind(householdId, id ?? "")
       .first<{ member_id: string }>();
     if (partner) return { ok: false, message: "This household already has one partner." };
+  }
+  if (householdId && householdRole === "head") {
+    const head = await db
+      .prepare(
+        `SELECT member_id FROM member_households
+         WHERE household_id = ? AND role = 'head' AND valid_until IS NULL AND member_id <> ?`,
+      )
+      .bind(householdId, id ?? "")
+      .first<{ member_id: string }>();
+    if (head) return { ok: false, message: "This household already has one head." };
   }
   if (uniqueGroupIds.some((groupId) => !allGroups.some((group) => group.id === groupId))) {
     return { ok: false, message: "One of the selected groups was not found." };

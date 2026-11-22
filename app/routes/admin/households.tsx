@@ -1,4 +1,4 @@
-import { Form, data } from "react-router";
+import { Form, Link, data } from "react-router";
 import { BuildingOffice2Icon, HomeIcon } from "@heroicons/react/24/outline";
 
 import type { Route } from "./+types/households";
@@ -92,7 +92,11 @@ export default function Households({ loaderData, actionData }: Route.ComponentPr
             {loaderData.households.map((household) => (
               <li key={household.id} className="px-4 py-4 sm:px-5">
                 <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-                  <h2 className="font-semibold text-slate-900">{household.name}</h2>
+                  <h2 className="font-semibold text-slate-900">
+                    <Link to={`/admin/households/${household.id}`} className="hover:text-brand">
+                      {household.name}
+                    </Link>
+                  </h2>
                   <span className="text-xs text-slate-500">{household.member_count} current members</span>
                 </div>
                 <Form method="post" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

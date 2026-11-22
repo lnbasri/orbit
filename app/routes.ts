@@ -14,6 +14,7 @@ export default [
       route("members/new", "routes/admin/member-new.tsx"),
       route("members/:id", "routes/admin/member.tsx"),
       route("households", "routes/admin/households.tsx"),
+      route("households/:id", "routes/admin/household-detail.tsx"),
       route("groups", "routes/admin/groups.tsx"),
       route("admins", "routes/admin/admins.tsx"),
     ]),
