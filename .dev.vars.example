@@ -10,4 +10,5 @@ ADMIN_EMAILS=admin@example.com
 
 # Optional external email sign-in. Keep empty for local development.
 RESEND_API_KEY=
+RESEND_WEBHOOK_SECRET=
 GOOGLE_CLIENT_SECRET=

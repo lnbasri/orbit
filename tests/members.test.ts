@@ -1,10 +1,17 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { strFromU8, unzipSync } from "fflate";
 
 import {
   addMemberRelationship,
+  communicationRecipientsToCsv,
   endMemberRelationship,
+  exportMembers,
   getHouseholdDetail,
+  getMemberProfile,
+  importMembersCsv,
   listMembers,
+  membersToCsv,
+  membersToXlsx,
   previewHouseholdLifecycle,
   processHouseholdLifecycle,
   saveGroup,
@@ -212,6 +219,53 @@ describe("member records", () => {
     expect(await setMemberArchived(db, "admin@example.org", initial.id, false, new Date("2026-11-21T12:00:00.000Z"))).toMatchObject({ ok: true });
   });
 
+  it("keeps complete consent history beyond the recent profile history limit", async () => {
+    const initial = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Consent History Member"),
+      undefined,
+      "",
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+    );
+    expect(initial.ok).toBe(true);
+    if (!initial.ok) return;
+
+    await saveMember(
+      db,
+      "admin@example.org",
+      { ...memberInput("Consent History Member"), communicationConsent: true },
+      initial.id,
+      "",
+      [],
+      new Date("2026-11-21T10:00:00.000Z"),
+    );
+
+    await db.batch(
+      Array.from({ length: 55 }, (_, index) =>
+        db
+          .prepare(
+            "INSERT INTO member_history (member_id, changed_at, changed_by, changes_json) VALUES (?, ?, ?, ?)",
+          )
+          .bind(
+            initial.id,
+            new Date(Date.UTC(2026, 10, 22, 0, index)).toISOString(),
+            "admin@example.org",
+            JSON.stringify({ notes: { from: null, to: `Update ${index}` } }),
+          ),
+      ),
+    );
+
+    const profile = await getMemberProfile(db, initial.id);
+    expect(profile.history).toHaveLength(50);
+    expect(profile.consentHistory).toHaveLength(2);
+    expect(profile.consentHistory.map((entry) => [entry.consent_from, entry.consent_to])).toEqual([
+      [0, 1],
+      [null, 0],
+    ]);
+  });
+
   it("allows only one partner and permits multiple children in a household", async () => {
     const household = await saveHousehold(
       db,
@@ -293,6 +347,160 @@ describe("member records", () => {
       "child",
     );
     expect(firstChild.ok && secondChild.ok).toBe(true);
+  });
+
+  it("keeps the household head pointer aligned when a head changes households", async () => {
+    const firstHousehold = await saveHousehold(
+      db,
+      "admin@example.org",
+      { name: "First household", address: "", postalCode: "", city: "", country: "", status: "active", statusNote: "" },
+    );
+    const secondHousehold = await saveHousehold(
+      db,
+      "admin@example.org",
+      { name: "Second household", address: "", postalCode: "", city: "", country: "", status: "active", statusNote: "" },
+    );
+    expect(firstHousehold.ok && secondHousehold.ok).toBe(true);
+    if (!firstHousehold.ok || !secondHousehold.ok) return;
+
+    const head = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Moving Head"),
+      undefined,
+      firstHousehold.id,
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "head",
+    );
+    expect(head.ok).toBe(true);
+    if (!head.ok) return;
+
+    const moved = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Moving Head"),
+      head.id,
+      secondHousehold.id,
+      [],
+      new Date("2026-11-21T10:00:00.000Z"),
+      {},
+      "head",
+    );
+    expect(moved.ok).toBe(true);
+    expect(await db.prepare("SELECT head_member_id FROM households WHERE id = ?").bind(firstHousehold.id).first())
+      .toEqual({ head_member_id: null });
+    expect(await db.prepare("SELECT head_member_id FROM households WHERE id = ?").bind(secondHousehold.id).first())
+      .toEqual({ head_member_id: head.id });
+  });
+
+  it("atomically allows only one concurrent partner assignment", async () => {
+    const household = await saveHousehold(
+      db,
+      "admin@example.org",
+      { name: "Concurrent household", address: "", postalCode: "", city: "", country: "", status: "active", statusNote: "" },
+    );
+    expect(household.ok).toBe(true);
+    if (!household.ok) return;
+
+    const head = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Concurrent Head"),
+      undefined,
+      household.id,
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "head",
+    );
+    expect(head.ok).toBe(true);
+    if (!head.ok) return;
+
+    const attempts = await Promise.all([
+      saveMember(
+        db, "admin@example.org", memberInput("Partner One"), undefined, household.id, [],
+        new Date("2026-11-21T10:00:00.000Z"), {}, "partner",
+      ),
+      saveMember(
+        db, "admin@example.org", memberInput("Partner Two"), undefined, household.id, [],
+        new Date("2026-11-21T10:00:00.000Z"), {}, "partner",
+      ),
+    ]);
+
+    expect(attempts.filter((attempt) => attempt.ok)).toHaveLength(1);
+    expect(attempts.filter((attempt) => !attempt.ok)).toHaveLength(1);
+    expect(await db
+      .prepare("SELECT COUNT(*) AS count FROM member_households WHERE household_id = ? AND role = 'partner' AND valid_until IS NULL")
+      .bind(household.id)
+      .first()).toEqual({ count: 1 });
+    expect(await db
+      .prepare("SELECT COUNT(*) AS count FROM members WHERE full_name IN (?, ?)")
+      .bind("Partner One", "Partner Two")
+      .first()).toEqual({ count: 1 });
+  });
+
+  it("enforces head-pointer consistency for direct database writes", async () => {
+    const household = await saveHousehold(
+      db,
+      "admin@example.org",
+      { name: "Database rules household", address: "", postalCode: "", city: "", country: "", status: "active", statusNote: "" },
+    );
+    expect(household.ok).toBe(true);
+    if (!household.ok) return;
+
+    const member = await saveMember(db, "admin@example.org", memberInput("Database Head"));
+    expect(member.ok).toBe(true);
+    if (!member.ok) return;
+
+    await db
+      .prepare("INSERT INTO member_households (member_id, household_id, role, assigned_by, valid_from) VALUES (?, ?, 'head', ?, ?)")
+      .bind(member.id, household.id, "admin@example.org", "2026-11-20T10:00:00.000Z")
+      .run();
+    expect(await db.prepare("SELECT head_member_id FROM households WHERE id = ?").bind(household.id).first())
+      .toEqual({ head_member_id: member.id });
+
+    await expect(
+      db.prepare("UPDATE households SET head_member_id = NULL WHERE id = ?").bind(household.id).run(),
+    ).rejects.toThrow("household head must match a current head assignment");
+  });
+
+  it("rejects invalid roles and direct assignments to inactive households", async () => {
+    const activeHousehold = await saveHousehold(
+      db,
+      "admin@example.org",
+      { name: "Role validation household", address: "", postalCode: "", city: "", country: "", status: "active", statusNote: "" },
+    );
+    const inactiveHousehold = await saveHousehold(
+      db,
+      "admin@example.org",
+      { name: "Inactive household", address: "", postalCode: "", city: "", country: "", status: "inactive", statusNote: "" },
+    );
+    expect(activeHousehold.ok && inactiveHousehold.ok).toBe(true);
+    if (!activeHousehold.ok || !inactiveHousehold.ok) return;
+
+    expect(await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Invalid Role Member"),
+      undefined,
+      activeHousehold.id,
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "member",
+    )).toMatchObject({ ok: false, message: "Select a valid household role." });
+
+    const member = await saveMember(db, "admin@example.org", memberInput("Inactive Assignment"));
+    expect(member.ok).toBe(true);
+    if (!member.ok) return;
+    await expect(
+      db
+        .prepare("INSERT INTO member_households (member_id, household_id, role, assigned_by, valid_from) VALUES (?, ?, 'child', ?, ?)")
+        .bind(member.id, inactiveHousehold.id, "admin@example.org", "2026-11-20T10:00:00.000Z")
+        .run(),
+    ).rejects.toThrow("current member assignments require an active household");
   });
 
   it("returns household detail with current and former members", async () => {
@@ -428,5 +636,197 @@ describe("member records", () => {
     expect(await db.prepare("SELECT valid_until FROM member_relationships WHERE id = ?").bind(relation!.id).first()).toMatchObject({
       valid_until: expect.any(String),
     });
+  });
+});
+
+describe("CSV import/export", () => {
+  const baseInput = (fullName: string) => ({
+    fullName,
+    preferredName: "",
+    firstName: fullName.split(" ")[0] ?? "",
+    middleName: "",
+    familyName: fullName.split(" ").slice(1).join(" ") || "Member",
+    dateOfBirth: "",
+    gender: "male" as const,
+    address: "",
+    postalCode: "",
+    city: "",
+    country: "",
+    preferredLanguage: "",
+    communicationConsent: false,
+    email: "",
+    phone: "",
+    status: "active" as const,
+    statusNote: "",
+    joinedOn: "",
+    notes: "",
+  });
+
+  it("membersToCsv renders header and rows with proper escaping", async () => {
+    await saveMember(
+      db,
+      "admin@example.org",
+      {
+        ...baseInput("Ada Lovelace"),
+        email: "ada@example.org",
+        notes: 'She said, "hello"',
+        statusNote: "=1+1",
+        communicationConsent: true,
+      },
+    );
+
+    const members = await exportMembers(db, { q: "", status: "" });
+    const csv = membersToCsv(members);
+
+    expect(csv).toContain("ID,Full Name,Preferred Name,First Name,Middle Name,Family Name");
+    expect(csv).toContain("Consent Updated At");
+    expect(csv).toContain("Archived At");
+    expect(csv).toContain("Ada Lovelace");
+    expect(csv).toContain("ada@example.org");
+    // Quotes in notes should be escaped
+    expect(csv).toContain('"She said, ""hello"""');
+    expect(csv).toContain("'=1+1");
+  });
+
+  it("creates an Excel workbook with member values stored as text", async () => {
+    await saveMember(db, "admin@example.org", {
+      ...baseInput("Ada Lovelace"),
+      notes: "=1+1",
+    });
+
+    const members = await exportMembers(db, { q: "", status: "" });
+    const files = unzipSync(membersToXlsx(members));
+    const worksheet = strFromU8(files["xl/worksheets/sheet1.xml"]);
+
+    expect(worksheet).toContain('<c r="A1" t="inlineStr">');
+    expect(worksheet).toContain("Archived At");
+    expect(worksheet).toContain("=1+1");
+    expect(worksheet).not.toContain("<f>");
+  });
+
+  it("keeps the communication recipient export limited to contact fields", () => {
+    const csv = communicationRecipientsToCsv([
+      {
+        ...baseInput("Ada Lovelace"),
+        id: "member-1",
+        full_name: "Ada Lovelace",
+        preferred_name: null,
+        first_name: "Ada",
+        middle_name: null,
+        family_name: "Lovelace",
+        date_of_birth: "1815-12-10",
+        gender: "female",
+        address: "1 Analytical Engine Way",
+        postal_code: null,
+        city: null,
+        country: null,
+        preferred_language: null,
+        communication_consent: 1,
+        communication_consent_updated_at: null,
+        email: "ada@example.org",
+        phone: null,
+        status: "active",
+        status_note: null,
+        joined_on: null,
+        notes: "Private note",
+        created_at: "2024-01-01",
+        updated_at: "2024-01-01",
+        archived_at: null,
+      },
+    ]);
+
+    expect(csv).toContain("Full Name,Preferred Name,Email,Phone,Status");
+    expect(csv).toContain("ada@example.org");
+    expect(csv).not.toContain("Date of Birth");
+    expect(csv).not.toContain("Private note");
+  });
+
+  it("exportMembers returns members matching filters", async () => {
+    await saveMember(db, "admin@example.org", { ...baseInput("Active Member"), status: "active" });
+    await saveMember(db, "admin@example.org", { ...baseInput("Inactive Member"), status: "inactive" });
+
+    const active = await exportMembers(db, { q: "", status: "active" });
+    expect(active.length).toBe(1);
+    expect(active[0].full_name).toBe("Active Member");
+
+    const all = await exportMembers(db, { q: "", status: "" });
+    expect(all.length).toBe(2);
+  });
+
+  it("importMembersCsv imports valid rows and reports invalid ones", async () => {
+    const csv = `Full Name,First Name,Family Name,Email,Gender,Status,Communication Consent
+Grace Hopper,Grace,Hopper,grace@example.org,female,active,TRUE
+,Bad,Email,not-an-email,male,active,TRUE
+Alan Turing,Alan,Turing,alan@example.org,male,active,TRUE`;
+
+    const result = await importMembersCsv(db, "admin@example.org", csv);
+
+    expect(result.ok).toBe(true);
+    expect(result.imported).toBe(2);
+    expect(result.errors).toBe(1);
+    expect(result.errorRows).toHaveLength(1);
+    expect(result.errorRows[0].row).toBe(2);
+
+    const count = (await listMembers(db, { q: "", status: "", page: 1 })).count;
+    expect(count).toBe(2);
+  });
+
+  it("importMembersCsv reports duplicate people but allows a shared family email", async () => {
+    await saveMember(db, "admin@example.org", {
+      ...baseInput("Existing Member"),
+      email: "existing@example.org",
+    });
+    const csv = `Full Name,Email
+New Member,new@example.org
+Existing Member,EXISTING@example.org
+New Member,new@example.org
+Another Member,new@example.org`;
+
+    const result = await importMembersCsv(db, "admin@example.org", csv);
+
+    expect(result.imported).toBe(2);
+    expect(result.errors).toBe(2);
+    expect(result.errorRows.map(({ message }) => message)).toEqual([
+      "A member with this name and email already exists.",
+      "A member with this name and email is repeated in this file.",
+    ]);
+    expect((await listMembers(db, { q: "", status: "", page: 1 })).count).toBe(3);
+  });
+
+  it("importMembersCsv handles empty CSV", async () => {
+    const result = await importMembersCsv(db, "admin@example.org", "Full Name,Email\n");
+    expect(result.ok).toBe(true);
+    expect(result.imported).toBe(0);
+    expect(result.message).toBe("No rows found in CSV.");
+  });
+
+  it("importMembersCsv constructs full name from first + family when missing", async () => {
+    const csv = `First Name,Family Name,Email
+Linus,Torvalds,linus@example.org`;
+
+    const result = await importMembersCsv(db, "admin@example.org", csv);
+    expect(result.ok).toBe(true);
+    expect(result.imported).toBe(1);
+
+    const member = await db
+      .prepare("SELECT full_name FROM members WHERE email = ?")
+      .bind("linus@example.org")
+      .first<{ full_name: string }>();
+    expect(member?.full_name).toBe("Linus Torvalds");
+  });
+
+  it("importMembersCsv records audit entries for imported members", async () => {
+    const csv = `Full Name,Email
+Ada Lovelace,ada@example.org`;
+
+    await importMembersCsv(db, "admin@example.org", csv);
+
+    const member = await db.prepare("SELECT id FROM members WHERE email = ?").bind("ada@example.org").first<{ id: string }>();
+    const audit = await db
+      .prepare("SELECT action, target, actor FROM audit_log WHERE action = 'member.import'")
+      .first<{ action: string; target: string; actor: string }>();
+    expect(audit?.action).toBe("member.import");
+    expect(audit?.target).toBe(member?.id);
+    expect(audit?.actor).toBe("admin@example.org");
   });
 });

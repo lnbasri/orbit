@@ -1,6 +1,10 @@
 import { Outlet, data, isRouteErrorResponse, redirect } from "react-router";
 import {
   BuildingOffice2Icon,
+  BanknotesIcon,
+  ClipboardDocumentCheckIcon,
+  DocumentTextIcon,
+  EnvelopeIcon,
   ExclamationTriangleIcon,
   ShieldCheckIcon,
   Squares2X2Icon,
@@ -25,7 +29,7 @@ export const middleware: Route.MiddlewareFunction[] = [
     const orbitPath =
       path === "/admin" ||
       /^\/admin\/members(?:\/(?:new|[A-Za-z0-9_-]+))?\/?$/.test(path) ||
-      /^\/admin\/(?:households(?:\/[A-Za-z0-9_-]+)?|groups|admins)\/?$/.test(path);
+      /^\/admin\/(?:households(?:\/[A-Za-z0-9_-]+)?|groups|contributions|communications|approvals|documents(?:\/[A-Za-z0-9_-]+\/download)?|admins)\/?$/.test(path);
     if (!orbitPath || !featureEnabled(env, "admin")) throw data("Not found.", { status: 404 });
     if (request.method !== "GET" && request.method !== "HEAD" && !isSameOrigin(request)) {
       throw data("Request denied.", { status: 403 });
@@ -80,6 +84,10 @@ const NAV: AdminNavItem[] = [
   { to: "/admin/members", label: "Members", icon: UserGroupIcon, end: false },
   { to: "/admin/households", label: "Households", icon: BuildingOffice2Icon, end: false },
   { to: "/admin/groups", label: "Groups", icon: Squares2X2Icon, end: false },
+  { to: "/admin/contributions", label: "Contributions", icon: BanknotesIcon, end: false },
+  { to: "/admin/communications", label: "Communications", icon: EnvelopeIcon, end: false },
+  { to: "/admin/documents", label: "Documents", icon: DocumentTextIcon, end: false },
+  { to: "/admin/approvals", label: "Approvals", icon: ClipboardDocumentCheckIcon, end: false },
   { to: "/admin/admins", label: "Access", icon: ShieldCheckIcon, end: false },
 ];
 

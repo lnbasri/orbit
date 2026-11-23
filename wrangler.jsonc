@@ -14,10 +14,21 @@
       "migrations_dir": "migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "DOCUMENTS",
+      "bucket_name": "orbit-documents",
+      "preview_bucket_name": "orbit-documents-preview"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "vars": {
     "APP_ENV": "development",
     "ADMIN_EMAILS": "",
     "EMAIL_MODE": "log",
+    "ENABLE_EMAIL_DELIVERY": "false",
     "EMAIL_FROM": "ORBIT <no-reply@example.com>",
     "EMAIL_REPLY_TO": "no-reply@example.com",
     "TURNSTILE_SITE_KEY": "1x00000000000000000000AA",

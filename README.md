@@ -5,14 +5,18 @@
 ## Current foundation
 
 - Searchable member directory with profile creation and editing.
+- Filtered CSV and Excel member exports, plus CSV import with validation and duplicate-member reporting.
 - Household records with shared addresses and current member links.
 - Administrative groups with member assignments.
+- Manual contribution and invoice ledger with partial payments, multi-currency balances, and auditable void/correction history.
 - Directional relationships between members.
 - Date-effective household, group, and person-to-person links.
 - Member profile change history, including who made each change.
 - Existing administrator sign-in and access controls, reused from the source application.
+- Consent-aware group communications with individualized bulk messages, one batch approval, and recipient exports.
+- Editable document and email templates, versioned PDF generation, and approval queues for documents and communications.
 
-The initial member profile is intentionally limited to name, preferred name, email, phone, membership status, join date, and notes. No date of birth or other sensitive fields are collected in this first slice.
+Member profiles include personal details, contact information, communication consent, status, and notes. Handle exported files as sensitive personal data and store them only in approved locations.
 
 ## Local development
 
@@ -24,7 +28,9 @@ npm run setup:local
 npm run dev
 ```
 
-Open <http://localhost:5173>. The default local administrator is `admin@example.com`; set `DEV_ADMIN_EMAIL` in `.dev.vars` to change it. Local email mode is a no-send log mode.
+Open <http://localhost:5173>. The default local administrator is `admin@example.com`; set `DEV_ADMIN_EMAIL` in `.dev.vars` to change it. Messages and generated PDFs require approval by a different active administrator. Email delivery is disabled by default; local PDF files use Wrangler's R2 emulation.
+
+To enable approved communications in a provisioned deployment, configure `EMAIL_MODE=resend`, `ENABLE_EMAIL_DELIVERY=true`, `RESEND_API_KEY`, and `PUBLIC_APP_URL`. All four are required for live sending. The Worker processes approved messages on its five-minute schedule, retries transient failures, and accepts Resend delivery events at `/webhooks/resend`; set `RESEND_WEBHOOK_SECRET` to verify those events. Recipient-specific unsubscribe links are tokenized and handled at `/unsubscribe`. Provision the R2 bucket named in `wrangler.jsonc` before deploying. Do not set the delivery flag for development or tests.
 
 Useful commands:
 

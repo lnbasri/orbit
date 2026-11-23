@@ -3,10 +3,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   addAdmin,
   ensureBootstrap,
+  getAdmin,
   isAdmin,
   listAdmins,
   parseEmailList,
   removeAdmin,
+  setAdminRole,
   touchLogin,
 } from "../app/lib/admins.server";
 import { resetDb, startDb } from "./helpers";
@@ -120,5 +122,84 @@ describe("last login", () => {
     const later = new Date(t0.getTime() + 2 * 3_600_000);
     await touchLogin(db, "a@x.nl", later);
     expect((await listAdmins(db))[0].last_login_at).toBe(later.toISOString());
+  });
+});
+
+describe("set admin role", () => {
+  it("allows super admin to change another admin's role and audits it", async () => {
+    await ensureBootstrap(db, "a@x.nl");
+    await addAdmin(db, "a@x.nl", "b@x.nl", "Bea", "ADMIN");
+
+    const res = await setAdminRole(db, "a@x.nl", "b@x.nl", "SUPER_ADMIN");
+    expect(res.ok).toBe(true);
+
+    const row = (await listAdmins(db)).find((a) => a.email === "b@x.nl");
+    expect(row?.role).toBe("SUPER_ADMIN");
+
+    const audit = await db
+      .prepare("SELECT action, target, detail FROM audit_log WHERE action = 'admin.role.change'")
+      .first<{ detail: string }>();
+    expect(audit).toMatchObject({ target: "b@x.nl" });
+    expect(JSON.parse(audit!.detail).role).toBe("SUPER_ADMIN");
+  });
+
+  it("rejects non-super admin changing roles", async () => {
+    await ensureBootstrap(db, "a@x.nl");
+    await addAdmin(db, "a@x.nl", "b@x.nl", "Bea", "ADMIN");
+
+    expect(await setAdminRole(db, "b@x.nl", "a@x.nl", "SUPER_ADMIN")).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("Only a super administrator"),
+    });
+  });
+
+  it("rejects unknown roles", async () => {
+    await ensureBootstrap(db, "a@x.nl");
+    expect(await setAdminRole(db, "a@x.nl", "a@x.nl", "OWNER" as any)).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("Unknown administrator role"),
+    });
+  });
+
+  it("prevents a super admin from demoting themselves", async () => {
+    await ensureBootstrap(db, "a@x.nl");
+    expect(await setAdminRole(db, "a@x.nl", "a@x.nl", "ADMIN")).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("cannot remove your own super administrator role"),
+    });
+  });
+});
+
+describe("admin write permission enforcement", () => {
+  it("rejects add-admin from non-super admin", async () => {
+    await ensureBootstrap(db, "a@x.nl");
+    await addAdmin(db, "a@x.nl", "b@x.nl", "Bea", "ADMIN");
+
+    expect(await addAdmin(db, "b@x.nl", "c@x.nl", "Cecil")).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("Only a super administrator"),
+    });
+  });
+
+  it("rejects remove-admin from non-super admin", async () => {
+    await ensureBootstrap(db, "a@x.nl");
+    await addAdmin(db, "a@x.nl", "b@x.nl", "Bea", "ADMIN");
+
+    expect(await removeAdmin(db, "b@x.nl", "a@x.nl")).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("Only a super administrator"),
+    });
+  });
+});
+
+describe("admin active status", () => {
+  it("isAdmin returns false for inactive admins", async () => {
+    await ensureBootstrap(db, "a@x.nl");
+    await db
+      .prepare("UPDATE admins SET active = 0 WHERE email = ?")
+      .bind("a@x.nl")
+      .run();
+    expect(await isAdmin(db, "a@x.nl")).toBe(false);
+    expect(await getAdmin(db, "a@x.nl")).toBeNull();
   });
 });

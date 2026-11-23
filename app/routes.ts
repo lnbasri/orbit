@@ -2,6 +2,8 @@ import { type RouteConfig, index, layout, prefix, route } from "@react-router/de
 
 export default [
   index("routes/home.tsx"),
+  route("unsubscribe", "routes/unsubscribe.ts"),
+  route("webhooks/resend", "routes/webhooks/resend.ts"),
 
   ...prefix("admin", [
     route("login", "routes/admin/login.tsx"),
@@ -16,6 +18,11 @@ export default [
       route("households", "routes/admin/households.tsx"),
       route("households/:id", "routes/admin/household-detail.tsx"),
       route("groups", "routes/admin/groups.tsx"),
+      route("contributions", "routes/admin/contributions.tsx"),
+      route("communications", "routes/admin/communications.tsx"),
+      route("approvals", "routes/admin/approvals.tsx"),
+      route("documents", "routes/admin/documents.tsx"),
+      route("documents/:id/download", "routes/admin/document-download.ts"),
       route("admins", "routes/admin/admins.tsx"),
     ]),
   ]),

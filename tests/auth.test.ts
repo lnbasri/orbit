@@ -162,6 +162,14 @@ describe("sessions", () => {
     expect((await db.prepare("SELECT COUNT(*) AS n FROM admin_sessions").first<{ n: number }>())!.n).toBe(0);
   });
 
+  it("refuses sessions for inactive admins and invalidates their existing sessions", async () => {
+    const session = (await createSession(db, "admin@x.nl", "pin", meta, T0))!;
+    await db.prepare("UPDATE admins SET active = 0 WHERE email = ?").bind("admin@x.nl").run();
+
+    expect((await identifyUser(requestWithCookie(session.token), prodEnv(), at(1000))).ok).toBe(false);
+    expect(await createSession(db, "admin@x.nl", "pin", meta, at(2000))).toBeNull();
+  });
+
   it("end on logout and ignore forged or missing cookies", async () => {
     const s = (await createSession(db, "admin@x.nl", "pin", meta, T0))!;
     await destroySession(db, requestWithCookie(s.token), at(1000));

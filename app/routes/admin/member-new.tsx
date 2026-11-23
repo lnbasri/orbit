@@ -97,6 +97,7 @@ export default function NewMember({ loaderData, actionData }: Route.ComponentPro
         currentGroups={[]}
         relationships={[]}
         history={[]}
+        consentHistory={[]}
         assignmentHistory={[]}
         otherMembers={[]}
         result={actionData}

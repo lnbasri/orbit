@@ -166,7 +166,7 @@ export async function createSession(
     db
       .prepare(
         `INSERT INTO admin_sessions (token_hash, email, method, created_at, expires_at, ip, user_agent)
-         SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM admins WHERE email = ?)`,
+         SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM admins WHERE email = ? AND active = 1)`,
       )
       .bind(await sha256Hex(token), email, method, nowIso, expiresAt, meta.ip, meta.userAgent, email),
     db.prepare("DELETE FROM admin_sessions WHERE expires_at <= ?").bind(nowIso),
@@ -198,7 +198,7 @@ export async function identifyUser(
   if (!hash) return { ok: false };
   const row = await env.DB.prepare(
     `SELECT s.email, s.method FROM admin_sessions s JOIN admins a ON a.email = s.email
-     WHERE s.token_hash = ? AND s.expires_at > ?`,
+     WHERE s.token_hash = ? AND s.expires_at > ? AND a.active = 1`,
   )
     .bind(hash, now.toISOString())
     .first<{ email: string; method: AuthMethod }>();

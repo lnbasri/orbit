@@ -118,6 +118,7 @@ export default function MemberProfile({ loaderData, actionData }: Route.Componen
         currentGroups={loaderData.groups}
         relationships={loaderData.relationships}
         history={loaderData.history}
+        consentHistory={loaderData.consentHistory}
         assignmentHistory={loaderData.assignmentHistory}
         otherMembers={loaderData.otherMembers}
         result={actionData}

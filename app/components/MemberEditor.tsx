@@ -10,6 +10,7 @@ import type {
   GroupRow,
   HouseholdRow,
   MemberAssignmentHistoryRow,
+  MemberConsentHistoryRow,
   MemberHistoryRow,
   MemberRelationshipRow,
   MemberRow,
@@ -31,6 +32,7 @@ export function MemberEditor({
   currentGroups,
   relationships,
   history,
+  consentHistory,
   assignmentHistory,
   otherMembers,
   result,
@@ -42,6 +44,7 @@ export function MemberEditor({
   currentGroups: (GroupRow & { role: string })[];
   relationships: MemberRelationshipRow[];
   history: MemberHistoryRow[];
+  consentHistory: MemberConsentHistoryRow[];
   assignmentHistory: MemberAssignmentHistoryRow[];
   otherMembers: { id: string; full_name: string }[];
   result?: MemberEditorResult;
@@ -235,10 +238,42 @@ export function MemberEditor({
               ) : <p className="text-sm text-slate-500">No household, group, or relationship changes recorded.</p>}
             </div>
           </Panel>
+
+          <Panel title="Communication consent history" icon={ClockIcon}>
+            <p className="mb-4 text-sm text-slate-600">
+              Current setting: <span className="font-semibold">{member.communication_consent === 1 ? "Yes" : "No"}</span>
+              {consentHistory[0] ? (
+                <> · Last recorded {formatDateTime(consentHistory[0].changed_at)} by {consentHistory[0].changed_by}</>
+              ) : null}
+            </p>
+            {consentHistory.length ? (
+              <ol className="space-y-4">
+                {consentHistory.map((entry) => (
+                  <li key={entry.id} className="border-l-2 border-emerald-200 pl-3">
+                    <p className="text-xs text-slate-500">{formatDateTime(entry.changed_at)} · {entry.changed_by}</p>
+                    <dl className="mt-2 space-y-1">
+                      <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-xs">
+                        <dt className="font-medium text-slate-600">Communication consent</dt>
+                        <dd className="break-words text-slate-700">
+                          {consentLabel(entry.consent_from)} <span className="text-slate-400">→</span> {consentLabel(entry.consent_to)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </li>
+                ))}
+              </ol>
+            ) : <p className="text-sm text-slate-500">No consent changes are recorded for this member.</p>}
+          </Panel>
         </div>
       ) : null}
     </div>
   );
+}
+
+function consentLabel(value: number | null) {
+  if (value === 1) return "Yes";
+  if (value === 0) return "No";
+  return "Not recorded";
 }
 
 function Field({

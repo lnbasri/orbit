@@ -1,0 +1,1 @@
+export const CONTRIBUTION_PAGE_SIZE = 25;
