@@ -1,5 +1,6 @@
-import { data } from "react-router";
+import { data, Link } from "react-router";
 
+import { buttonClass } from "~/components/ui";
 import type { Route } from "./+types/member";
 import { MemberEditor } from "~/components/MemberEditor";
 import { adminEmailContext } from "~/lib/admin-context";
@@ -107,9 +108,17 @@ export function meta({ loaderData }: Route.MetaArgs) {
 export default function MemberProfile({ loaderData, actionData }: Route.ComponentProps) {
   return (
     <div>
-      <h1 className="mb-6 text-gradient-brand text-2xl font-bold tracking-tight sm:text-[1.75rem]">
-        {loaderData.member.full_name}
-      </h1>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-gradient-brand text-2xl font-bold tracking-tight sm:text-[1.75rem]">
+          {loaderData.member.full_name}
+        </h1>
+        <Link
+          to={`/admin/privacy?memberId=${encodeURIComponent(loaderData.member.id)}`}
+          className={buttonClass("secondary", "md")}
+        >
+          Record privacy request
+        </Link>
+      </div>
       <MemberEditor
         member={loaderData.member}
         households={loaderData.households}

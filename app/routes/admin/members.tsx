@@ -19,6 +19,7 @@ import {
   membersToXlsx,
   type ImportMembersResult,
 } from "~/lib/members.server";
+import { audit } from "~/lib/db.server";
 import { getAppEnv } from "~/lib/env.server";
 import { adminEmailContext } from "~/lib/admin-context";
 import { formatDateTime } from "~/lib/format";
@@ -45,6 +46,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     const status = String(form.get("status") ?? "");
     const members = await exportMembers(db, { q, status });
     const csv = membersToCsv(members);
+    await audit(db, actor, "member.export", null, { format: "csv", count: members.length });
     const stamp = formatDateTime(new Date().toISOString()).replace(/[^0-9]/g, "").slice(0, 14);
     return new Response(csv, {
       headers: {
@@ -59,6 +61,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     const status = String(form.get("status") ?? "");
     const members = await exportMembers(db, { q, status });
     const xlsx = membersToXlsx(members);
+    await audit(db, actor, "member.export", null, { format: "xlsx", count: members.length });
     const body = new ArrayBuffer(xlsx.byteLength);
     new Uint8Array(body).set(xlsx);
     const stamp = formatDateTime(new Date().toISOString()).replace(/[^0-9]/g, "").slice(0, 14);

@@ -20,6 +20,7 @@ export default [
       route("groups", "routes/admin/groups.tsx"),
       route("contributions", "routes/admin/contributions.tsx"),
       route("communications", "routes/admin/communications.tsx"),
+      route("privacy", "routes/admin/privacy.tsx"),
       route("approvals", "routes/admin/approvals.tsx"),
       route("documents", "routes/admin/documents.tsx"),
       route("documents/:id/download", "routes/admin/document-download.ts"),

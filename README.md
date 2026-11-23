@@ -14,6 +14,7 @@
 - Member profile change history, including who made each change.
 - Existing administrator sign-in and access controls, reused from the source application.
 - Consent-aware group communications with individualized bulk messages, one batch approval, and recipient exports.
+- Admin privacy-request register with identity verification tracking and reviewed personal-data export packages.
 - Editable document and email templates, versioned PDF generation, and approval queues for documents and communications.
 
 Member profiles include personal details, contact information, communication consent, status, and notes. Handle exported files as sensitive personal data and store them only in approved locations.

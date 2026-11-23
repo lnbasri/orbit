@@ -51,6 +51,9 @@ The scheduled backup will not work until the account ID, database ID, export tok
 - For an erasure request, verify the request, identify records that may need to be retained for accounting or other obligations, record the decision, and remove or anonymize only the data approved for removal. The application currently has no hard-delete workflow.
 - Explain that a deletion from the live database may remain in protected backups until their 30-day expiry; do not promise immediate erasure from backup copies.
 - Treat member exports, SQL backups, and generated PDFs as sensitive data. Limit access and remove working copies when no longer needed.
+- Record member requests from the member profile in the admin privacy-request register. Set response targets according to the organization's approved procedure; ORBIT does not calculate legal deadlines.
+- Personal-data ZIP exports are available only for verified access or portability cases. They include a review warning because household records, message content, notes, and documents may contain information about other people. An administrator must review the package before sharing it; ORBIT does not send it to the requester.
+- Privacy-request cases and export actions are audited. No request-record retention period is automated; include these cases in the organization's approved retention schedule.
 
 ## Monitoring
 

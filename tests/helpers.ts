@@ -29,6 +29,7 @@ export async function startDb() {
 
 export async function resetDb(db: D1Database) {
   await db.batch([
+    db.prepare("DELETE FROM privacy_requests"),
     db.prepare("DELETE FROM member_history"),
     db.prepare("DELETE FROM member_relationships"),
     db.prepare("DELETE FROM member_group_memberships"),
