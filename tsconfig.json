@@ -3,6 +3,7 @@
   "references": [
     { "path": "./tsconfig.node.json" },
     { "path": "./tsconfig.cloudflare.json" },
+    { "path": "./tsconfig.backup.json" },
     { "path": "./tsconfig.tests.json" }
   ],
   "compilerOptions": {

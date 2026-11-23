@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "orbit-backup",
+  "workers_dev": false,
+  "compatibility_date": "2026-11-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "./workers/backup.ts",
+  "observability": { "enabled": true },
+  "workflows": [
+    {
+      "name": "orbit-daily-backup",
+      "binding": "DAILY_BACKUP",
+      "class_name": "OrbitBackupWorkflow",
+      "schedules": ["17 2 * * *"]
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "DOCUMENTS", "bucket_name": "orbit-documents" },
+    { "binding": "BACKUPS", "bucket_name": "orbit-backups" }
+  ],
+  "vars": {
+    "BACKUP_PREFIX": "daily"
+  }
+}

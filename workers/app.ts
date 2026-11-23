@@ -17,6 +17,11 @@ export default {
     if (emailDeliveryReady(env)) {
       work.push(processEmailQueue(env.DB, emailConfig(env), true));
     }
-    context.waitUntil(Promise.all(work));
+    context.waitUntil(
+      Promise.all(work).catch((error: unknown) => {
+        console.error("ORBIT scheduled task failed:", error instanceof Error ? error.message : String(error));
+        throw error;
+      }),
+    );
   },
 } satisfies ExportedHandler<Env>;

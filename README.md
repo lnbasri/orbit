@@ -43,6 +43,8 @@ npm run db:reset:local
 
 The app uses React Router Framework Mode, React, TypeScript, Cloudflare Workers, and D1. SQL schema changes belong in a new ordered migration under `migrations/`.
 
+See [production operations](./docs/production-operations.md) for the privacy lifecycle, daily backup setup, recovery checks, and production provisioning requirements.
+
 ## Deployment is intentionally disabled
 
 This repository was copied from another application. Its original Cloudflare database IDs, domains, and automatic deployment workflow have been removed. The Wrangler database ID is a placeholder and `workers_dev` is disabled.
