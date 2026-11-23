@@ -60,11 +60,20 @@ export async function action({ request, context }: Route.ActionArgs) {
     }
   }
   if (intent !== "save-household") return data({ ok: false, message: "Unknown action." }, { status: 400 });
+  const householdId = String(form.get("householdId") ?? "");
+  if (!householdId) {
+    return data(
+      { ok: false, message: "Create a household by adding its Head as a member." },
+      { status: 400 },
+    );
+  }
   const result = await saveHousehold(
     getAppEnv().DB,
     context.get(adminEmailContext),
     {
       name: String(form.get("name") ?? ""),
+      email: String(form.get("email") ?? ""),
+      phone: String(form.get("phone") ?? ""),
       address: String(form.get("address") ?? ""),
       postalCode: String(form.get("postalCode") ?? ""),
       city: String(form.get("city") ?? ""),
@@ -72,7 +81,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       status: String(form.get("status") ?? "active"),
       statusNote: String(form.get("statusNote") ?? ""),
     },
-    String(form.get("householdId") ?? "") || undefined,
+    householdId,
   );
   return data(result, { status: result.ok ? 200 : 400 });
 }
@@ -81,11 +90,8 @@ export default function Households({ loaderData, actionData }: Route.ComponentPr
   const result = actionData;
   return (
     <div>
-      <PageHeader eyebrow="Organisation" title="Households" description="Group people who share a household and maintain their shared address." />
+      <PageHeader eyebrow="Organisation" title="Households" description="Manage household contacts, shared addresses, and current member links." />
       <Notice result={result} className="mb-5" />
-      <Panel title="Add a household" icon={HomeIcon}>
-        <HouseholdForm />
-      </Panel>
       <Panel title={<>Household directory <span className="text-slate-400 tabular-nums">({loaderData.households.length})</span></>} icon={BuildingOffice2Icon} flush className="mt-6">
         {loaderData.households.length ? (
           <ul className="divide-y divide-slate-100">
@@ -103,6 +109,8 @@ export default function Households({ loaderData, actionData }: Route.ComponentPr
                   <input type="hidden" name="intent" value="save-household" />
                   <input type="hidden" name="householdId" value={household.id} />
                   <TextField name="name" label="Household name" required maxLength={120} defaultValue={household.name} />
+                  <TextField name="email" label="Household email" type="email" maxLength={254} defaultValue={household.email ?? ""} />
+                  <TextField name="phone" label="Household phone" type="tel" maxLength={40} defaultValue={household.phone ?? ""} />
                   <TextField name="address" label="Address" maxLength={240} defaultValue={household.address ?? ""} />
                   <TextField name="postalCode" label="Postal code" maxLength={20} defaultValue={household.postal_code ?? ""} />
                   <TextField name="city" label="City" maxLength={120} defaultValue={household.city ?? ""} />
@@ -140,30 +148,8 @@ export default function Households({ loaderData, actionData }: Route.ComponentPr
               </li>
             ))}
           </ul>
-        ) : <EmptyState icon={HomeIcon}>No households yet. Add one above, then link members from their profiles.</EmptyState>}
+        ) : <EmptyState icon={HomeIcon}>No households yet. <Link to="/admin/members/new" className="font-medium text-brand underline underline-offset-2">Add a Head member</Link> to create one.</EmptyState>}
       </Panel>
     </div>
-  );
-}
-
-function HouseholdForm() {
-  return (
-    <Form method="post" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <input type="hidden" name="intent" value="save-household" />
-      <TextField name="name" label="Household name" required maxLength={120} placeholder="e.g. Hasan household" />
-      <TextField name="address" label="Address" maxLength={240} />
-      <TextField name="postalCode" label="Postal code" maxLength={20} />
-      <TextField name="city" label="City" maxLength={120} />
-      <TextField name="country" label="Country" maxLength={120} />
-      <label className="text-sm font-medium text-slate-700">
-        Status
-        <select name="status" defaultValue="active" className="mt-1.5 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/15">
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-        </select>
-      </label>
-      <TextField name="statusNote" label="Status note" maxLength={2000} />
-      <button type="submit" className={`${buttonClass("primary", "md")} self-end`}>Add household</button>
-    </Form>
   );
 }

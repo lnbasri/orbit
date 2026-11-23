@@ -55,6 +55,275 @@ const memberInput = (fullName: string) => ({
 });
 
 describe("member records", () => {
+  it("creates a household head and related members together", async () => {
+    const head = {
+      ...memberInput("Noor Hasan"),
+      firstName: "Noor",
+      familyName: "Hasan",
+      address: "Main Street 1",
+      postalCode: "1234 AB",
+      city: "The Hague",
+      country: "NL",
+      email: "noor@example.org",
+      phone: "+31 6 12345678",
+    };
+    const created = await saveMember(
+      db,
+      "admin@example.org",
+      head,
+      undefined,
+      "",
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "head",
+      {
+        name: "Hasan",
+        email: head.email,
+        phone: head.phone,
+        address: head.address,
+        postalCode: head.postalCode,
+        city: head.city,
+        country: head.country,
+        additionalMembers: [
+          { role: "partner", member: {
+            ...memberInput("Sam Hasan"),
+            firstName: "Sam",
+            familyName: "Hasan",
+            address: head.address,
+            postalCode: head.postalCode,
+            city: head.city,
+            country: head.country,
+          } },
+          { role: "child", member: {
+            ...memberInput("Mina Hasan"),
+            firstName: "Mina",
+            familyName: "Hasan",
+            address: "Different Street 2",
+          } },
+        ],
+      },
+    );
+
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const household = await db.prepare(`
+      SELECT h.name, h.head_member_id, h.email, h.phone, h.address, h.postal_code, h.city, h.country
+      FROM households h
+      JOIN member_households mh ON mh.household_id = h.id
+      WHERE mh.member_id = ? AND mh.role = 'head' AND mh.valid_until IS NULL
+    `).bind(created.id).first();
+    expect(household).toEqual({
+      name: "Hasan",
+      head_member_id: created.id,
+      email: "noor@example.org",
+      phone: "+31 6 12345678",
+      address: "Main Street 1",
+      postal_code: "1234 AB",
+      city: "The Hague",
+      country: "NL",
+    });
+
+    const members = await db.prepare(`
+      SELECT m.full_name, m.address, mh.role
+      FROM members m
+      JOIN member_households mh ON mh.member_id = m.id
+      WHERE mh.valid_until IS NULL
+      ORDER BY m.full_name
+    `).all<{ full_name: string; address: string | null; role: string }>();
+    expect(members.results).toEqual([
+      { full_name: "Mina Hasan", address: "Different Street 2", role: "child" },
+      { full_name: "Noor Hasan", address: "Main Street 1", role: "head" },
+      { full_name: "Sam Hasan", address: "Main Street 1", role: "partner" },
+    ]);
+  });
+
+  it("rejects multiple partners in a new household without writing records", async () => {
+    const created = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Noor Hasan"),
+      undefined,
+      "",
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "head",
+      {
+        name: "Hasan",
+        address: "",
+        postalCode: "",
+        city: "",
+        country: "",
+        additionalMembers: [
+          { role: "partner", member: memberInput("Sam Hasan") },
+          { role: "partner", member: memberInput("Mina Hasan") },
+        ],
+      },
+    );
+
+    expect(created).toMatchObject({
+      ok: false,
+      message: "A household can have only one partner.",
+    });
+    expect(await db.prepare("SELECT COUNT(*) AS count FROM members").first()).toEqual({ count: 0 });
+    expect(await db.prepare("SELECT COUNT(*) AS count FROM households").first()).toEqual({ count: 0 });
+  });
+
+  it("limits a new household to eight additional members", async () => {
+    const created = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Noor Hasan"),
+      undefined,
+      "",
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "head",
+      {
+        name: "Hasan",
+        address: "",
+        postalCode: "",
+        city: "",
+        country: "",
+        additionalMembers: Array.from({ length: 9 }, (_, index) => ({
+          role: "child",
+          member: memberInput(`Child ${index + 1}`),
+        })),
+      },
+    );
+
+    expect(created).toMatchObject({
+      ok: false,
+      message: "A household can include up to 8 additional members at a time.",
+    });
+    expect(await db.prepare("SELECT COUNT(*) AS count FROM members").first()).toEqual({ count: 0 });
+    expect(await db.prepare("SELECT COUNT(*) AS count FROM households").first()).toEqual({ count: 0 });
+  });
+
+  it("requires a contact method to record communication consent for an additional member", async () => {
+    const member = memberInput("Sam Hasan");
+    const created = await saveMember(
+      db,
+      "admin@example.org",
+      memberInput("Noor Hasan"),
+      undefined,
+      "",
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "head",
+      {
+        name: "Hasan",
+        address: "",
+        postalCode: "",
+        city: "",
+        country: "",
+        additionalMembers: [
+          { role: "child", member: { ...member, communicationConsent: true } },
+        ],
+      },
+    );
+
+    expect(created).toMatchObject({
+      ok: false,
+      message: "Household member 1: communication consent requires an email address or phone number.",
+    });
+    expect(await db.prepare("SELECT COUNT(*) AS count FROM members").first()).toEqual({ count: 0 });
+    expect(await db.prepare("SELECT COUNT(*) AS count FROM households").first()).toEqual({ count: 0 });
+  });
+
+  it("enforces unique household names when creating and editing households", async () => {
+    const household = await saveHousehold(db, "admin@example.org", {
+      name: "Hasan",
+      email: "noor@example.org",
+      phone: "+31 6 12345678",
+      address: "",
+      postalCode: "",
+      city: "",
+      country: "",
+      status: "active",
+      statusNote: "",
+    });
+    expect(household.ok).toBe(true);
+    if (!household.ok) return;
+
+    expect(await saveHousehold(db, "admin@example.org", {
+      name: "  hasan ",
+      address: "",
+      postalCode: "",
+      city: "",
+      country: "",
+      status: "active",
+      statusNote: "",
+    })).toMatchObject({
+      ok: false,
+      message: "A household with that name already exists. Choose another unique name.",
+    });
+    expect(await saveHousehold(db, "admin@example.org", {
+      name: "HASAN",
+      email: "family@example.org",
+      phone: "+31 6 87654321",
+      address: "",
+      postalCode: "",
+      city: "",
+      country: "",
+      status: "active",
+      statusNote: "",
+    }, household.id)).toMatchObject({ ok: true, id: household.id });
+    expect(await db.prepare("SELECT email, phone FROM households WHERE id = ?")
+      .bind(household.id)
+      .first()).toEqual({
+        email: "family@example.org",
+        phone: "+31 6 87654321",
+      });
+
+    await expect(db.prepare(`
+      INSERT INTO households (id, name, status, created_at, updated_at)
+      VALUES ('duplicate-household', ' hasan ', 'active', '2026-11-20', '2026-11-20')
+    `).run()).rejects.toThrow();
+  });
+
+  it("rejects a duplicate household name during new member creation", async () => {
+    await saveHousehold(db, "admin@example.org", {
+      name: "Hasan",
+      address: "",
+      postalCode: "",
+      city: "",
+      country: "",
+      status: "active",
+      statusNote: "",
+    });
+
+    const created = await saveMember(
+      db,
+      "admin@example.org",
+      { ...memberInput("Noor Hasan"), firstName: "Noor", familyName: "Hasan" },
+      undefined,
+      "",
+      [],
+      new Date("2026-11-20T10:00:00.000Z"),
+      {},
+      "head",
+      {
+        name: "hasan",
+        address: "",
+        postalCode: "",
+        city: "",
+        country: "",
+        additionalMembers: [],
+      },
+    );
+    expect(created).toMatchObject({
+      ok: false,
+      message: 'A household with that name already exists. Try "Noor Hasan" if it is not already in use, or choose another unique name.',
+    });
+    expect(await db.prepare("SELECT COUNT(*) AS count FROM members").first()).toEqual({ count: 0 });
+    expect(await db.prepare("SELECT COUNT(*) AS count FROM households").first()).toEqual({ count: 1 });
+  });
+
   it("creates members, records an initial history entry, and rejects invalid email", async () => {
     const created = await saveMember(db, "admin@example.org", {
       ...memberInput("  Noor Hasan  "),

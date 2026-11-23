@@ -7,7 +7,8 @@ import {
 } from "~/components/admin";
 import { buttonClass } from "~/components/ui";
 import type { Route } from "./+types/privacy";
-import { adminEmailContext } from "~/lib/admin-context";
+import { adminAccessContext, adminEmailContext } from "~/lib/admin-context";
+import { hasAdminCapability } from "~/lib/admin-access";
 import { audit } from "~/lib/db.server";
 import { getAppEnv } from "~/lib/env.server";
 import {
@@ -47,19 +48,26 @@ export function meta() {
   return [{ title: "Privacy requests — ORBIT" }, { name: "robots", content: "noindex" }];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
   const db = getAppEnv().DB;
+  const access = context.get(adminAccessContext);
   const url = new URL(request.url);
   const memberId = url.searchParams.get("memberId") ?? "";
-  const selectedMember = memberId
-    ? await db.prepare("SELECT id, full_name FROM members WHERE id = ?")
-        .bind(memberId)
-        .first<{ id: string; full_name: string }>()
-    : null;
+  const [selectedMember, members] = await Promise.all([
+    memberId
+      ? db.prepare("SELECT id, full_name FROM members WHERE id = ?")
+          .bind(memberId)
+          .first<{ id: string; full_name: string }>()
+      : Promise.resolve(null),
+    db.prepare("SELECT id, full_name FROM members WHERE archived_at IS NULL ORDER BY full_name")
+      .all<{ id: string; full_name: string }>(),
+  ]);
   return {
     requests: await listPrivacyRequests(db),
     selectedMember,
+    members: members.results,
     today: new Date().toISOString().slice(0, 10),
+    canExport: hasAdminCapability(access, "privacy.export"),
   };
 }
 
@@ -68,6 +76,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   const intent = String(form.get("intent") ?? "");
   const env = getAppEnv();
   const actor = context.get(adminEmailContext);
+  const access = context.get(adminAccessContext);
 
   if (intent === "create") {
     const result = await createPrivacyRequest(
@@ -100,6 +109,9 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   if (intent === "export") {
+    if (!hasAdminCapability(access, "privacy.export")) {
+      throw data("Access denied. Personal-data export permission is required.", { status: 403 });
+    }
     const requestId = String(form.get("requestId") ?? "");
     const archive = await buildPrivacyExport(env.DB, env.DOCUMENTS, requestId);
     await audit(env.DB, actor, "privacy.request.export", requestId, { format: "zip" });
@@ -122,7 +134,7 @@ export default function PrivacyRequests({
   actionData,
 }: Route.ComponentProps) {
   const result = actionData as { ok: boolean; message: string } | undefined;
-  const { requests, selectedMember, today } = loaderData;
+  const { requests, selectedMember, members, today, canExport } = loaderData;
 
   return (
     <div>
@@ -133,11 +145,20 @@ export default function PrivacyRequests({
       />
       <Notice result={result} className="mb-5" />
 
-      {selectedMember ? (
-        <Panel title={`Record a request for ${selectedMember.full_name}`} className="mb-6">
+      <Panel title={selectedMember ? `Record a request for ${selectedMember.full_name}` : "Record a request"} className="mb-6">
           <Form method="post" className="space-y-4">
             <input type="hidden" name="intent" value="create" />
-            <input type="hidden" name="memberId" value={selectedMember.id} />
+            {selectedMember ? (
+              <input type="hidden" name="memberId" value={selectedMember.id} />
+            ) : (
+              <label className="block text-sm font-medium text-slate-700">
+                Member
+                <select name="memberId" required className={INPUT_CLASS} defaultValue="">
+                  <option value="">Select a member</option>
+                  {members.map((member) => <option key={member.id} value={member.id}>{member.full_name}</option>)}
+                </select>
+              </label>
+            )}
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm font-medium text-slate-700">
                 Request type
@@ -172,14 +193,7 @@ export default function PrivacyRequests({
             </p>
             <button type="submit" className={buttonClass("primary", "md")}>Record request</button>
           </Form>
-        </Panel>
-      ) : (
-        <Panel title="Record a request">
-          <p className="text-sm text-slate-600">
-            Start from a member profile using <strong>Record privacy request</strong> so the case is linked to the correct record.
-          </p>
-        </Panel>
-      )}
+      </Panel>
 
       <Panel title={`Request register (${requests.length})`}>
         {requests.length ? (
@@ -244,7 +258,7 @@ export default function PrivacyRequests({
                       Save case
                     </button>
                   </Form>
-                  {canExport(item) ? (
+                  {canExport && canExportRequest(item) ? (
                     <Form method="post">
                       <input type="hidden" name="intent" value="export" />
                       <input type="hidden" name="requestId" value={item.id} />
@@ -265,7 +279,7 @@ export default function PrivacyRequests({
   );
 }
 
-function canExport(request: PrivacyRequestRow) {
+function canExportRequest(request: PrivacyRequestRow) {
   return request.verification_status === "verified" &&
     (request.request_type === "access" || request.request_type === "portability") &&
     request.member_id !== null &&

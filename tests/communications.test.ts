@@ -8,9 +8,15 @@ import {
 import { createApprovalReminders, decideApproval } from "../app/lib/approvals.server";
 import { emailDeliveryReady } from "../app/lib/config.server";
 import {
+  resolveEmailTemplateInputFields,
+} from "../app/lib/email-template";
+import {
+  deleteEmailTemplate,
+  listEmailTemplates,
   processEmailQueue,
   queueCommunication,
   queueCommunicationBatch,
+  saveEmailTemplate,
   unsubscribeByToken,
   verifyResendWebhook,
 } from "../app/lib/email.server";
@@ -120,6 +126,110 @@ describe("communications local queue", () => {
 
     expect(await db.prepare("SELECT kind FROM email_templates WHERE name = ?").bind("general").first())
       .toEqual({ kind: "general" });
+  });
+
+  it("persists template composer inputs and infers inputs for existing templates", async () => {
+    const templates = await listEmailTemplates(db);
+    const notice = templates.find((template) => template.name === "notice");
+    expect(notice).toBeDefined();
+    expect(resolveEmailTemplateInputFields(notice!.input_fields_json, notice!))
+      .toEqual(["title", "content"]);
+
+    const result = await saveEmailTemplate(db, "sender@example.org", {
+      name: "custom-notice",
+      subject: "Reminder: {{title}}",
+      html: "<h1>{{title}}</h1><p>{{content}}</p>",
+      text: "{{title}}\n\n{{content}}",
+      kind: "general",
+      active: true,
+      inputFields: ["title", "content"],
+    });
+    expect(result.ok).toBe(true);
+
+    const saved = (await listEmailTemplates(db)).find((template) => template.name === "custom-notice");
+    expect(saved?.input_fields_json).toBe('["title","content"]');
+    expect(resolveEmailTemplateInputFields(saved!.input_fields_json, saved!))
+      .toEqual(["title", "content"]);
+  });
+
+  it("deletes inactive email templates without queue history and audits the deletion", async () => {
+    await saveEmailTemplate(db, "sender@example.org", {
+      name: "unused-template",
+      subject: "Unused",
+      html: "<p>Unused</p>",
+      text: "",
+      kind: "general",
+      active: false,
+      inputFields: [],
+    });
+    const template = (await listEmailTemplates(db)).find((item) => item.name === "unused-template");
+    expect(template).toBeDefined();
+
+    const result = await deleteEmailTemplate(
+      db,
+      "sender@example.org",
+      template!.id,
+      new Date("2026-11-23T10:00:00.000Z"),
+    );
+
+    expect(result).toEqual({ ok: true, message: "Inactive email template deleted." });
+    expect((await listEmailTemplates(db)).some((item) => item.id === template!.id)).toBe(false);
+    expect(await db.prepare(
+      "SELECT action, target FROM audit_log WHERE action = 'communication.template.delete'",
+    ).first()).toEqual({ action: "communication.template.delete", target: "unused-template" });
+  });
+
+  it("requires templates to be inactive and unreferenced before deletion", async () => {
+    await saveEmailTemplate(db, "sender@example.org", {
+      name: "referenced-template",
+      subject: "A message",
+      html: "<p>A message</p>",
+      text: "",
+      kind: "general",
+      active: true,
+      inputFields: [],
+    });
+    const template = (await listEmailTemplates(db)).find((item) => item.name === "referenced-template");
+    expect(template).toBeDefined();
+    expect(await deleteEmailTemplate(db, "sender@example.org", template!.id)).toEqual({
+      ok: false,
+      message: "Deactivate this template before deleting it.",
+    });
+
+    await addAdmins();
+    await addMember("Ada Lovelace", "ada@example.org", true);
+    expect((await queueCommunication(db, {
+      templateName: "referenced-template",
+      recipientEmail: "ada@example.org",
+      fields: {},
+      sentBy: "sender@example.org",
+      assignedTo: "reviewer@example.org",
+      purpose: "",
+    })).ok).toBe(true);
+    await db.prepare("UPDATE email_templates SET is_active = 0 WHERE id = ?").bind(template!.id).run();
+
+    expect(await deleteEmailTemplate(db, "sender@example.org", template!.id)).toEqual({
+      ok: false,
+      message: "This template has 1 queue record and must remain for message history.",
+    });
+    expect((await listEmailTemplates(db)).some((item) => item.id === template!.id)).toBe(true);
+  });
+
+  it("rejects templates that use a composer placeholder without enabling its input", async () => {
+    const result = await saveEmailTemplate(db, "sender@example.org", {
+      name: "missing-title-input",
+      subject: "Reminder: {{title}}",
+      html: "<p>Message</p>",
+      text: "",
+      kind: "general",
+      active: true,
+      inputFields: [],
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      message: "Enable these template input fields or remove their placeholders: Title.",
+    });
   });
 
   it("queues a consented member locally without marking it sent", async () => {

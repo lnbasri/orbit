@@ -5,7 +5,8 @@ import type { Route } from "./+types/documents";
 import { EmptyState, Notice, PageHeader, Panel } from "~/components/admin";
 import { TextField } from "~/components/forms";
 import { buttonClass } from "~/components/ui";
-import { adminEmailContext } from "~/lib/admin-context";
+import { adminAccessContext, adminEmailContext } from "~/lib/admin-context";
+import { hasAdminCapability } from "~/lib/admin-access";
 import { listAdmins } from "~/lib/admins.server";
 import {
   generateDocument,
@@ -25,6 +26,7 @@ export function meta() {
 export async function loader({ request, context }: Route.LoaderArgs) {
   const env = getAppEnv();
   const actor = context.get(adminEmailContext);
+  const access = context.get(adminAccessContext);
   const url = new URL(request.url);
   const [templates, admins, members, households, documents] = await Promise.all([
     listDocumentTemplates(env.DB),
@@ -58,6 +60,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     households: households.results,
     documents,
     preview,
+    canDownload: hasAdminCapability(access, "documents.download"),
   };
 }
 
@@ -105,7 +108,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 export default function Documents({ loaderData, actionData }: Route.ComponentProps) {
-  const { templates, approvers, members, households, documents, preview } = loaderData;
+  const { templates, approvers, members, households, documents, preview, canDownload } = loaderData;
   return (
     <div>
       <PageHeader eyebrow="Documents" title="Document automation" description="Maintain reusable templates, generate versioned PDFs, and route them for approval." />
@@ -229,7 +232,7 @@ export default function Documents({ loaderData, actionData }: Route.ComponentPro
                   <p className="text-slate-600">{document.subject_name} · {document.template_name} · v{document.version}</p>
                   <p className="text-xs capitalize text-slate-500">{document.status.replaceAll("_", " ")} · {formatDateTime(document.created_at)}</p>
                 </div>
-                {document.status === "approved" && <a className="text-brand hover:underline" href={`/admin/documents/${document.id}/download`}>Download PDF</a>}
+                {document.status === "approved" && canDownload ? <a className="text-brand hover:underline" href={`/admin/documents/${document.id}/download`}>Download PDF</a> : null}
               </li>
             ))}
           </ul>

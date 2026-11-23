@@ -1,4 +1,5 @@
 import { auditStatement } from "./db.server";
+import { ADMIN_ACCESS_ROLES, ADMIN_CAPABILITY_OPTIONS } from "./admin-access";
 
 export interface AdminRow {
   email: string;
@@ -74,10 +75,33 @@ export async function addAdmin(
   nameRaw = "",
   role: AdminRole = "ADMIN",
   now = new Date(),
+  roleValues: readonly string[] = role === "ADMIN" ? ["MEMBERSHIP"] : [],
+  capabilityValues: readonly string[] = [],
+  departmentIdsRaw: readonly string[] = [],
 ): Promise<AdminResult> {
   const email = normalizeEmail(emailRaw);
   if (!EMAIL_RE.test(email)) return { ok: false, message: "Enter a valid email address." };
   if (role !== "SUPER_ADMIN" && role !== "ADMIN") return { ok: false, message: "Unknown administrator role." };
+  const roles = [...new Set(roleValues)];
+  if (roles.some((value) => !ADMIN_ACCESS_ROLES.some((candidate) => candidate.id === value))) {
+    return { ok: false, message: "Choose only supported access roles." };
+  }
+  if (role === "ADMIN" && roles.length === 0) {
+    return { ok: false, message: "Assign at least one role to a new administrator." };
+  }
+  const capabilities = [...new Set(capabilityValues)];
+  if (capabilities.some((value) => !ADMIN_CAPABILITY_OPTIONS.some((candidate) => candidate.id === value))) {
+    return { ok: false, message: "Choose only supported sensitive permissions." };
+  }
+  const departmentIds = [...new Set(departmentIdsRaw)];
+  if (departmentIds.length) {
+    const placeholders = departmentIds.map(() => "?").join(", ");
+    const found = await db.prepare(`SELECT id FROM admin_departments WHERE id IN (${placeholders})`)
+      .bind(...departmentIds).all<{ id: string }>();
+    if (found.results.length !== departmentIds.length) {
+      return { ok: false, message: "One or more selected departments are not available." };
+    }
+  }
   const actorAdmin = await getAdmin(db, actor);
   if (!actorAdmin || actorAdmin.role !== "SUPER_ADMIN") {
     return { ok: false, message: "Only a super administrator can manage administrators." };
@@ -91,7 +115,30 @@ export async function addAdmin(
     .run();
   if ((res.meta.changes ?? 0) !== 1) return { ok: false, message: `${email} is already an administrator.` };
 
-  await auditStatement(db, actor, "admin.add", email, name ? { name } : undefined, nowIso).run();
+  await db.batch([
+    ...roles.map((value) =>
+      db.prepare(
+        "INSERT INTO admin_role_assignments (admin_email, role, assigned_by, assigned_at) VALUES (?, ?, ?, ?)",
+      ).bind(email, value, actorAdmin.email, nowIso),
+    ),
+    ...capabilities.map((value) =>
+      db.prepare(
+        "INSERT INTO admin_capability_grants (admin_email, capability, assigned_by, assigned_at) VALUES (?, ?, ?, ?)",
+      ).bind(email, value, actorAdmin.email, nowIso),
+    ),
+    ...departmentIds.map((id) =>
+      db.prepare(
+        "INSERT INTO admin_department_memberships (department_id, admin_email, assigned_by, assigned_at) VALUES (?, ?, ?, ?)",
+      ).bind(id, email, actorAdmin.email, nowIso),
+    ),
+    auditStatement(db, actorAdmin.email, "admin.add", email, {
+      ...(name ? { name } : {}),
+      role,
+      accessRoles: roles,
+      capabilities,
+      departments: departmentIds,
+    }, nowIso),
+  ]);
   return { ok: true, message: `${email} was added as an administrator.` };
 }
 
@@ -113,11 +160,11 @@ export async function removeAdmin(
   if (email === normalizeEmail(actor)) {
     return { ok: false, message: "You cannot remove yourself. Ask another administrator." };
   }
-  const res = await db
-    .prepare("DELETE FROM admins WHERE email = ? AND (SELECT COUNT(*) FROM admins) > 1")
+  const removed = await db
+    .prepare("DELETE FROM admins WHERE email = ? AND (SELECT COUNT(*) FROM admins) > 1 RETURNING email")
     .bind(email)
-    .run();
-  if ((res.meta.changes ?? 0) !== 1) {
+    .first<{ email: string }>();
+  if (!removed) {
     const exists = await db.prepare("SELECT 1 AS ok FROM admins WHERE email = ?").bind(email).first();
     return {
       ok: false,
@@ -147,8 +194,18 @@ export async function setAdminRole(
     return { ok: false, message: "Unknown administrator role." };
   }
   const email = normalizeEmail(emailRaw);
+  const targetAdmin = await getAdmin(db, email);
+  if (!targetAdmin) return { ok: false, message: `${email} is not an active administrator.` };
   if (email === normalizeEmail(actor) && role !== "SUPER_ADMIN") {
     return { ok: false, message: "You cannot remove your own super administrator role." };
+  }
+  if (targetAdmin.role === "SUPER_ADMIN" && role === "ADMIN") {
+    const roleCount = await db.prepare(
+      "SELECT COUNT(*) AS count FROM admin_role_assignments WHERE admin_email = ?",
+    ).bind(email).first<{ count: number }>();
+    if ((roleCount?.count ?? 0) === 0) {
+      return { ok: false, message: "Assign at least one access role before demoting a super administrator." };
+    }
   }
   const result = await db
     .prepare("UPDATE admins SET role = ? WHERE email = ? AND active = 1")

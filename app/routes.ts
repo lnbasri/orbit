@@ -13,6 +13,7 @@ export default [
     layout("routes/admin/layout.tsx", [
       index("routes/admin/dashboard.tsx"),
       route("members", "routes/admin/members.tsx"),
+      route("members/export", "routes/admin/member-export.ts"),
       route("members/new", "routes/admin/member-new.tsx"),
       route("members/:id", "routes/admin/member.tsx"),
       route("households", "routes/admin/households.tsx"),

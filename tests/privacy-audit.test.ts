@@ -4,11 +4,14 @@ import { RouterContextProvider } from "react-router";
 const { getAppEnvMock } = vi.hoisted(() => ({ getAppEnvMock: vi.fn() }));
 vi.mock("~/lib/env.server", () => ({ getAppEnv: getAppEnvMock }));
 
-import { adminEmailContext } from "../app/lib/admin-context";
+import { adminAccessContext, adminEmailContext } from "../app/lib/admin-context";
+import { ALL_ADMIN_CAPABILITIES, ALL_ADMIN_MODULES } from "../app/lib/admin-access";
+import type { AdminAccessSnapshot } from "../app/lib/admin-access";
 import { createPrivacyRequest, updatePrivacyRequest } from "../app/lib/privacy.server";
 import { loader as downloadDocument } from "../app/routes/admin/document-download";
-import { action as exportMembers } from "../app/routes/admin/members";
+import { action as exportMembers } from "../app/routes/admin/member-export";
 import { action as privacyAction } from "../app/routes/admin/privacy";
+import { action as approvalsAction } from "../app/routes/admin/approvals";
 import { resetDb, startDb } from "./helpers";
 
 let db: D1Database;
@@ -24,9 +27,17 @@ beforeEach(async () => {
   await resetDb(db);
 });
 
-function adminContext() {
+function adminContext(access: AdminAccessSnapshot = {
+  role: "ADMIN",
+  roles: [],
+  modules: ALL_ADMIN_MODULES,
+  capabilities: ALL_ADMIN_CAPABILITIES,
+  departments: [],
+  isLegacy: true,
+}) {
   const context = new RouterContextProvider();
   context.set(adminEmailContext, "privacy-admin@example.org");
+  context.set(adminAccessContext, access);
   return context;
 }
 
@@ -39,6 +50,60 @@ async function insertMember() {
 }
 
 describe("personal data access audit", () => {
+  it("denies sensitive actions when their separate capability is not assigned", async () => {
+    const membershipAccess: AdminAccessSnapshot = {
+      role: "ADMIN",
+      roles: ["MEMBERSHIP"],
+      modules: ["overview", "members", "households", "groups"],
+      capabilities: [],
+      departments: [],
+      isLegacy: false,
+    };
+    const membersForm = new FormData();
+    membersForm.set("intent", "export");
+    const membersRequest = new Request("https://orbit.example/admin/members/export", { method: "POST", body: membersForm });
+    await expect(exportMembers({
+      request: membersRequest,
+      url: new URL(membersRequest.url),
+      pattern: "/admin/members/export",
+      context: adminContext(membershipAccess),
+      params: {},
+    })).rejects.toMatchObject({ init: { status: 403 } });
+
+    const privacyForm = new FormData();
+    privacyForm.set("intent", "export");
+    privacyForm.set("requestId", "missing");
+    const privacyRequest = new Request("https://orbit.example/admin/privacy", { method: "POST", body: privacyForm });
+    await expect(privacyAction({
+      request: privacyRequest,
+      url: new URL(privacyRequest.url),
+      pattern: "/admin/privacy",
+      context: adminContext({
+        ...membershipAccess,
+        roles: ["PRIVACY"],
+        modules: ["privacy"],
+      }),
+      params: {},
+    })).rejects.toMatchObject({ init: { status: 403 } });
+
+    const approvalsForm = new FormData();
+    approvalsForm.set("intent", "decide");
+    approvalsForm.set("decision", "approved");
+    approvalsForm.set("requestId", "approval-1");
+    const approvalsRequest = new Request("https://orbit.example/admin/approvals", { method: "POST", body: approvalsForm });
+    await expect(approvalsAction({
+      request: approvalsRequest,
+      url: new URL(approvalsRequest.url),
+      pattern: "/admin/approvals",
+      context: adminContext({
+        ...membershipAccess,
+        roles: [],
+        modules: ["approvals"],
+      }),
+      params: {},
+    })).rejects.toMatchObject({ init: { status: 403 } });
+  });
+
   it.each([
     ["export", "csv"],
     ["export-xlsx", "xlsx"],
@@ -46,11 +111,11 @@ describe("personal data access audit", () => {
     await insertMember();
     const form = new FormData();
     form.set("intent", intent);
-    const request = new Request("https://orbit.example/admin/members", { method: "POST", body: form });
+    const request = new Request("https://orbit.example/admin/members/export", { method: "POST", body: form });
     const args = {
       request,
       url: new URL(request.url),
-      pattern: "/admin/members",
+      pattern: "/admin/members/export",
       context: adminContext(),
       params: {},
     } satisfies Parameters<typeof exportMembers>[0];

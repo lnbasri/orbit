@@ -46,6 +46,8 @@ export async function action({ request, context, params }: Route.ActionArgs) {
       context.get(adminEmailContext),
       {
         name: String(form.get("name") ?? ""),
+        email: String(form.get("email") ?? ""),
+        phone: String(form.get("phone") ?? ""),
         address: String(form.get("address") ?? ""),
         postalCode: String(form.get("postalCode") ?? ""),
         city: String(form.get("city") ?? ""),
@@ -182,6 +184,8 @@ export default function HouseholdDetail({ loaderData, actionData }: Route.Compon
             <Form method="post" className="grid gap-3">
               <input type="hidden" name="intent" value="save-household" />
               <TextField name="name" label="Household name" required maxLength={120} defaultValue={household.name} />
+              <TextField name="email" label="Household email" type="email" maxLength={254} defaultValue={household.email ?? ""} />
+              <TextField name="phone" label="Household phone" type="tel" maxLength={40} defaultValue={household.phone ?? ""} />
               <TextField name="address" label="Address" maxLength={240} defaultValue={household.address ?? ""} />
               <TextField name="postalCode" label="Postal code" maxLength={20} defaultValue={household.postal_code ?? ""} />
               <TextField name="city" label="City" maxLength={120} defaultValue={household.city ?? ""} />

@@ -5,10 +5,11 @@ import type { Route } from "./+types/approvals";
 import { EmptyState, Notice, PageHeader, Panel } from "~/components/admin";
 import { TextField } from "~/components/forms";
 import { buttonClass } from "~/components/ui";
-import { adminEmailContext } from "~/lib/admin-context";
+import { adminAccessContext, adminEmailContext } from "~/lib/admin-context";
 import { decideApproval, markNotificationsRead } from "~/lib/approvals.server";
 import { getAppEnv } from "~/lib/env.server";
 import { formatDateTime } from "~/lib/format";
+import { hasAdminCapability, hasAdminModule } from "~/lib/admin-access";
 
 export function meta() {
   return [{ title: "Approvals — ORBIT" }, { name: "robots", content: "noindex" }];
@@ -17,6 +18,7 @@ export function meta() {
 export async function loader({ context }: Route.LoaderArgs) {
   const db = getAppEnv().DB;
   const actor = context.get(adminEmailContext);
+  const access = context.get(adminAccessContext);
   const [approvals, history, notifications] = await Promise.all([
     db.prepare(
       `SELECT a.id, a.resource_type, a.requested_by, a.created_at,
@@ -99,18 +101,28 @@ export async function loader({ context }: Route.LoaderArgs) {
        WHERE recipient = ? AND read_at IS NULL ORDER BY created_at DESC LIMIT 20`,
     ).bind(actor).all<{ id: number; message: string; href: string; created_at: string }>(),
   ]);
-  return { approvals, history: history.results, notifications: notifications.results };
+  return {
+    approvals,
+    history: history.results,
+    notifications: notifications.results,
+    canViewDocuments: hasAdminModule(access, "documents"),
+    canViewCommunications: hasAdminModule(access, "communications"),
+  };
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
   const form = await request.formData();
   const actor = context.get(adminEmailContext);
+  const access = context.get(adminAccessContext);
   const db = getAppEnv().DB;
   if (form.get("intent") === "mark-read") {
     await markNotificationsRead(db, actor);
     return data({ ok: true, message: "Notifications marked as read." });
   }
   if (form.get("intent") !== "decide") return data({ ok: false, message: "Unknown action." }, { status: 400 });
+  if (!hasAdminCapability(access, "approvals.decide")) {
+    throw data("Access denied. Approval decision permission is required.", { status: 403 });
+  }
   const decision = String(form.get("decision") ?? "");
   if (decision !== "approved" && decision !== "rejected") {
     return data({ ok: false, message: "Choose approve or reject." }, { status: 400 });
@@ -175,9 +187,11 @@ export default function Approvals({ loaderData, actionData }: Route.ComponentPro
                     <p className="text-sm text-slate-600">{item.recipient || ""}</p>
                     <p className="text-xs text-slate-500">Requested by {item.requested_by} · {formatDateTime(item.created_at)}</p>
                   </div>
-                  <a className="text-sm text-brand hover:underline" href={item.resource_type === "document" ? "/admin/documents" : "/admin/communications"}>
-                    View item
-                  </a>
+                  {item.resource_type === "document" && loaderData.canViewDocuments ? (
+                    <a className="text-sm text-brand hover:underline" href="/admin/documents">View item</a>
+                  ) : item.resource_type === "communication" && loaderData.canViewCommunications ? (
+                    <a className="text-sm text-brand hover:underline" href="/admin/communications">View item</a>
+                  ) : null}
                 </div>
                 {item.batch_recipients && (
                   <details className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">

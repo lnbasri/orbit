@@ -12,8 +12,16 @@ import {
 } from "@heroicons/react/24/outline";
 
 import type { Route } from "./+types/layout";
-import { adminAuthMethodContext, adminEmailContext, adminRoleContext } from "~/lib/admin-context";
+import { adminAccessContext, adminAuthMethodContext, adminEmailContext } from "~/lib/admin-context";
 import { ensureBootstrap, getAdmin, isAdmin, touchLogin } from "~/lib/admins.server";
+import { getAdminAccess } from "~/lib/admin-access.server";
+import {
+  defaultAdminPath,
+  getAdminRouteAccess,
+  hasAdminRouteAccess,
+  hasAdminModule,
+  type AdminModule,
+} from "~/lib/admin-access";
 import { identifyUser, isSameOrigin, loginPath } from "~/lib/auth.server";
 import { featureEnabled, isDev } from "~/lib/config.server";
 import { getAppEnv } from "~/lib/env.server";
@@ -26,11 +34,8 @@ export const middleware: Route.MiddlewareFunction[] = [
   async ({ request, url, context }, next) => {
     const env = getAppEnv();
     const path = url.pathname;
-    const orbitPath =
-      path === "/admin" ||
-      /^\/admin\/members(?:\/(?:new|[A-Za-z0-9_-]+))?\/?$/.test(path) ||
-      /^\/admin\/(?:households(?:\/[A-Za-z0-9_-]+)?|groups|contributions|communications|privacy|approvals|documents(?:\/[A-Za-z0-9_-]+\/download)?|admins)\/?$/.test(path);
-    if (!orbitPath || !featureEnabled(env, "admin")) throw data("Not found.", { status: 404 });
+    const routeAccess = getAdminRouteAccess(path);
+    if (!routeAccess || !featureEnabled(env, "admin")) throw data("Not found.", { status: 404 });
     if (request.method !== "GET" && request.method !== "HEAD" && !isSameOrigin(request)) {
       throw data("Request denied.", { status: 403 });
     }
@@ -46,13 +51,23 @@ export const middleware: Route.MiddlewareFunction[] = [
     if (!admin && result.method !== "dev") {
       throw data("Access denied.", { status: 403 });
     }
-    if (path === "/admin/admins" && admin?.role !== "SUPER_ADMIN" && result.method !== "dev") {
+    const access = await getAdminAccess(
+      env.DB,
+      result.email,
+      result.method === "dev" ? "dev" : (admin?.role ?? "ADMIN"),
+      result.method === "dev",
+    );
+    if (routeAccess.kind === "super-admin" && !hasAdminRouteAccess(access, routeAccess)) {
       throw data("Only super administrators can manage administrator access.", { status: 403 });
+    }
+    if (routeAccess.kind !== "super-admin" && !hasAdminRouteAccess(access, routeAccess)) {
+      if (path.replace(/\/+$/, "") === "/admin") throw redirect(defaultAdminPath(access));
+      throw data("Access denied. Your assigned administrator roles do not include this area.", { status: 403 });
     }
     await touchLogin(env.DB, result.email);
     context.set(adminEmailContext, result.email);
     context.set(adminAuthMethodContext, result.method);
-    context.set(adminRoleContext, result.method === "dev" ? "dev" : (admin?.role ?? "ADMIN"));
+    context.set(adminAccessContext, access);
     const response = await next();
     // Admin pages hold personal data: never cache them in shared or browser caches.
     if (response instanceof Response) {
@@ -76,27 +91,33 @@ export function loader({ context }: Route.LoaderArgs) {
     email: context.get(adminEmailContext),
     canLogout: context.get(adminAuthMethodContext) !== "dev",
     dev: isDev(env),
+    access: context.get(adminAccessContext),
   };
 }
 
-const NAV: AdminNavItem[] = [
-  { to: "/admin", label: "Overview", icon: Squares2X2Icon, end: true },
-  { to: "/admin/members", label: "Members", icon: UserGroupIcon, end: false },
-  { to: "/admin/households", label: "Households", icon: BuildingOffice2Icon, end: false },
-  { to: "/admin/groups", label: "Groups", icon: Squares2X2Icon, end: false },
-  { to: "/admin/contributions", label: "Contributions", icon: BanknotesIcon, end: false },
-  { to: "/admin/communications", label: "Communications", icon: EnvelopeIcon, end: false },
-  { to: "/admin/privacy", label: "Privacy requests", icon: ShieldCheckIcon, end: false },
-  { to: "/admin/documents", label: "Documents", icon: DocumentTextIcon, end: false },
-  { to: "/admin/approvals", label: "Approvals", icon: ClipboardDocumentCheckIcon, end: false },
-  { to: "/admin/admins", label: "Access", icon: ShieldCheckIcon, end: false },
+const NAV: (AdminNavItem & { module?: AdminModule; superAdmin?: boolean })[] = [
+  { to: "/admin", label: "Overview", icon: Squares2X2Icon, end: true, module: "overview" },
+  { to: "/admin/members", label: "Members", icon: UserGroupIcon, end: false, module: "members" },
+  { to: "/admin/households", label: "Households", icon: BuildingOffice2Icon, end: false, module: "households" },
+  { to: "/admin/groups", label: "Groups", icon: Squares2X2Icon, end: false, module: "groups" },
+  { to: "/admin/contributions", label: "Contributions", icon: BanknotesIcon, end: false, module: "contributions" },
+  { to: "/admin/communications", label: "Communications", icon: EnvelopeIcon, end: false, module: "communications" },
+  { to: "/admin/privacy", label: "Privacy requests", icon: ShieldCheckIcon, end: false, module: "privacy" },
+  { to: "/admin/documents", label: "Documents", icon: DocumentTextIcon, end: false, module: "documents" },
+  { to: "/admin/approvals", label: "Approvals", icon: ClipboardDocumentCheckIcon, end: false, module: "approvals" },
+  { to: "/admin/admins", label: "Access", icon: ShieldCheckIcon, end: false, superAdmin: true },
 ];
 
 export default function AdminLayout({ loaderData }: Route.ComponentProps) {
+  const access = loaderData.access;
+  const items = NAV.filter((item) =>
+    item.superAdmin ? access.role === "SUPER_ADMIN" || access.role === "dev" :
+      item.module ? hasAdminModule(access, item.module) : false,
+  );
   return (
     <Backdrop>
       <div className="print:hidden">
-        <AdminHeader items={NAV} email={loaderData.email} dev={loaderData.dev} canLogout={loaderData.canLogout} />
+        <AdminHeader items={items} email={loaderData.email} dev={loaderData.dev} canLogout={loaderData.canLogout} />
       </div>
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10">
         <Outlet />

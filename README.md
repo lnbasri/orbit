@@ -6,16 +6,16 @@
 
 - Searchable member directory with profile creation and editing.
 - Filtered CSV and Excel member exports, plus CSV import with validation and duplicate-member reporting.
-- Household records with shared addresses and current member links.
+- Household records with unique names, shared addresses, household contact details, and current member links. Create a household with its Head and up to eight additional members from the Add member flow.
 - Administrative groups with member assignments.
 - Manual contribution and invoice ledger with partial payments, multi-currency balances, and auditable void/correction history.
 - Directional relationships between members.
 - Date-effective household, group, and person-to-person links.
 - Member profile change history, including who made each change.
-- Existing administrator sign-in and access controls, reused from the source application.
+- Administrator access with separate Membership, Finance, Communications, Document preparer, Approver, and Privacy permission bundles.
 - Consent-aware group communications with individualized bulk messages, one batch approval, and recipient exports.
 - Admin privacy-request register with identity verification tracking and reviewed personal-data export packages.
-- Editable document and email templates, versioned PDF generation, and approval queues for documents and communications.
+- Editable document and email templates, configurable message inputs, live email previews, versioned PDF generation, and approval queues for documents and communications. Inactive email templates can be deleted when no queue history references them.
 
 Member profiles include personal details, contact information, communication consent, status, and notes. Handle exported files as sensitive personal data and store them only in approved locations.
 

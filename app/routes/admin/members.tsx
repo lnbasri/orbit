@@ -12,27 +12,30 @@ import { EmptyState, Notice, PageHeader, Panel } from "~/components/admin";
 import { TextField } from "~/components/forms";
 import { buttonClass } from "~/components/ui";
 import {
-  exportMembers,
   importMembersCsv,
   listMembers,
-  membersToCsv,
-  membersToXlsx,
   type ImportMembersResult,
 } from "~/lib/members.server";
-import { audit } from "~/lib/db.server";
 import { getAppEnv } from "~/lib/env.server";
-import { adminEmailContext } from "~/lib/admin-context";
-import { formatDateTime } from "~/lib/format";
+import { adminAccessContext, adminEmailContext } from "~/lib/admin-context";
+import { hasAdminCapability } from "~/lib/admin-access";
 
 export function meta() {
   return [{ title: "Members — ORBIT" }, { name: "robots", content: "noindex" }];
 }
 
-export async function loader({ url }: Route.LoaderArgs) {
+export async function loader({ url, context }: Route.LoaderArgs) {
   const q = url.searchParams.get("q") ?? "";
   const status = url.searchParams.get("status") ?? "";
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
-  return { q, status, ...(await listMembers(getAppEnv().DB, { q, status, page })) };
+  const access = context.get(adminAccessContext);
+  return {
+    q,
+    status,
+    canExport: hasAdminCapability(access, "members.export"),
+    canImport: hasAdminCapability(access, "members.import"),
+    ...(await listMembers(getAppEnv().DB, { q, status, page })),
+  };
 }
 
 export async function action({ request, context }: Route.ActionArgs) {
@@ -40,40 +43,12 @@ export async function action({ request, context }: Route.ActionArgs) {
   const intent = String(form.get("intent") ?? "");
   const db = getAppEnv().DB;
   const actor = context.get(adminEmailContext);
-
-  if (intent === "export") {
-    const q = String(form.get("q") ?? "");
-    const status = String(form.get("status") ?? "");
-    const members = await exportMembers(db, { q, status });
-    const csv = membersToCsv(members);
-    await audit(db, actor, "member.export", null, { format: "csv", count: members.length });
-    const stamp = formatDateTime(new Date().toISOString()).replace(/[^0-9]/g, "").slice(0, 14);
-    return new Response(csv, {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="orbit-members-${stamp}.csv"`,
-      },
-    });
-  }
-
-  if (intent === "export-xlsx") {
-    const q = String(form.get("q") ?? "");
-    const status = String(form.get("status") ?? "");
-    const members = await exportMembers(db, { q, status });
-    const xlsx = membersToXlsx(members);
-    await audit(db, actor, "member.export", null, { format: "xlsx", count: members.length });
-    const body = new ArrayBuffer(xlsx.byteLength);
-    new Uint8Array(body).set(xlsx);
-    const stamp = formatDateTime(new Date().toISOString()).replace(/[^0-9]/g, "").slice(0, 14);
-    return new Response(body, {
-      headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="orbit-members-${stamp}.xlsx"`,
-      },
-    });
-  }
+  const access = context.get(adminAccessContext);
 
   if (intent === "import") {
+    if (!hasAdminCapability(access, "members.import")) {
+      throw data("Access denied. Member import permission is required.", { status: 403 });
+    }
     const file = form.get("importFile");
     if (!(file instanceof File) || file.size === 0) {
       return data({ ok: false, message: "No file selected." } as ImportMembersResult, { status: 400 });
@@ -101,7 +76,7 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default function Members({ loaderData, actionData }: Route.ComponentProps) {
-  const { members, count, page, pageCount, q, status } = loaderData;
+  const { members, count, page, pageCount, q, status, canExport, canImport } = loaderData;
   const importResult = actionData as ImportMembersResult | undefined;
   return (
     <div>
@@ -111,22 +86,26 @@ export default function Members({ loaderData, actionData }: Route.ComponentProps
         description="Member profiles, current status, and links to their household and group records."
         actions={
           <>
-            <Form method="post" className="inline-flex">
-              <input type="hidden" name="intent" value="export" />
-              <input type="hidden" name="q" value={q} />
-              <input type="hidden" name="status" value={status} />
-              <button type="submit" className={buttonClass("secondary", "md")}>
-                <ArrowDownTrayIcon className="size-4 mr-1.5" aria-hidden="true" /> Export CSV
-              </button>
-            </Form>
-            <Form method="post" className="inline-flex">
-              <input type="hidden" name="intent" value="export-xlsx" />
-              <input type="hidden" name="q" value={q} />
-              <input type="hidden" name="status" value={status} />
-              <button type="submit" className={buttonClass("secondary", "md")}>
-                <ArrowDownTrayIcon className="size-4 mr-1.5" aria-hidden="true" /> Export Excel
-              </button>
-            </Form>
+            {canExport ? (
+              <>
+                <Form action="/admin/members/export" method="post" reloadDocument className="inline-flex">
+                  <input type="hidden" name="intent" value="export" />
+                  <input type="hidden" name="q" value={q} />
+                  <input type="hidden" name="status" value={status} />
+                  <button type="submit" className={buttonClass("secondary", "md")}>
+                    <ArrowDownTrayIcon className="size-4 mr-1.5" aria-hidden="true" /> Export CSV
+                  </button>
+                </Form>
+                <Form action="/admin/members/export" method="post" reloadDocument className="inline-flex">
+                  <input type="hidden" name="intent" value="export-xlsx" />
+                  <input type="hidden" name="q" value={q} />
+                  <input type="hidden" name="status" value={status} />
+                  <button type="submit" className={buttonClass("secondary", "md")}>
+                    <ArrowDownTrayIcon className="size-4 mr-1.5" aria-hidden="true" /> Export Excel
+                  </button>
+                </Form>
+              </>
+            ) : null}
             <Link to="/admin/members/new" className={buttonClass("primary", "md")}>
               <PlusIcon className="size-4" aria-hidden="true" /> Add member
             </Link>
@@ -155,7 +134,7 @@ export default function Members({ loaderData, actionData }: Route.ComponentProps
           </label>
           <button type="submit" className={buttonClass("secondary", "md")}>Filter</button>
         </Form>
-        <Panel title="Import members from CSV" icon={ArrowUpTrayIcon} className="mt-4" actions={
+        {canImport ? <Panel title="Import members from CSV" icon={ArrowUpTrayIcon} className="mt-4" actions={
           <Form method="post" encType="multipart/form-data" className="flex items-center gap-2">
             <input type="hidden" name="intent" value="import" />
             <input type="file" name="importFile" accept=".csv" className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-brand file:text-white hover:file:bg-brand-dark" />
@@ -166,7 +145,7 @@ export default function Members({ loaderData, actionData }: Route.ComponentProps
             Upload a CSV file with columns matching the member fields (Full Name, First Name, Last Name, Email, etc.).
             Invalid rows and duplicate name/email pairs are skipped and reported; valid rows are imported.
           </p>
-        </Panel>
+        </Panel> : null}
         {members.length ? (
           <>
             <ul className="divide-y divide-slate-100">

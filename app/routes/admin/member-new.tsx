@@ -45,11 +45,101 @@ export async function loader() {
 export async function action({ request, context }: Route.ActionArgs) {
   const form = await request.formData();
   if (form.get("intent") !== "save-member") return { ok: false, message: "Unknown action." };
+  const householdMode = String(form.get("householdMode") ?? "none");
+  if (!["none", "existing", "new"].includes(householdMode)) {
+    return { ok: false, message: "Choose a valid household setup." };
+  }
   const groupIds = form.getAll("groupIds").map(String);
   const firstName = String(form.get("firstName") ?? "").trim();
   const middleName = String(form.get("middleName") ?? "").trim();
   const familyName = String(form.get("familyName") ?? "").trim();
   const fullName = [firstName, middleName, familyName].filter(Boolean).join(" ");
+  const headAddress = {
+    address: String(form.get("address") ?? ""),
+    postalCode: String(form.get("postalCode") ?? ""),
+    city: String(form.get("city") ?? ""),
+    country: String(form.get("country") ?? ""),
+  };
+  let newHousehold: Parameters<typeof saveMember>[9];
+  if (householdMode === "new") {
+    const rawCount = String(form.get("additionalMemberCount") ?? "0");
+    const count = Number(rawCount);
+    if (!Number.isInteger(count) || count < 0 || count > 8) {
+      return { ok: false, message: "Choose between 0 and 8 additional household members." };
+    }
+    const repeatedFields = [
+      "additionalFirstName",
+      "additionalMiddleName",
+      "additionalFamilyName",
+      "additionalRole",
+      "additionalPreferredName",
+      "additionalDateOfBirth",
+      "additionalGender",
+      "additionalEmail",
+      "additionalPhone",
+      "additionalPreferredLanguage",
+      "additionalCommunicationConsent",
+      "additionalAddressMode",
+      "additionalAddress",
+      "additionalPostalCode",
+      "additionalCity",
+      "additionalCountry",
+    ];
+    const values = new Map<string, string[]>();
+    for (const name of repeatedFields) {
+      const entries = form.getAll(name);
+      if (entries.length !== count || entries.some((entry) => typeof entry !== "string")) {
+        return { ok: false, message: "Household member details are incomplete. Review the additional member fields." };
+      }
+      values.set(name, entries.map(String));
+    }
+    const field = (name: string, index: number) => values.get(name)![index];
+    const additionalMembers = Array.from({ length: count }, (_, index) => {
+      const addressMode = field("additionalAddressMode", index);
+      const email = field("additionalEmail", index);
+      const phone = field("additionalPhone", index);
+      return {
+        role: field("additionalRole", index),
+        member: {
+          firstName: field("additionalFirstName", index),
+          middleName: field("additionalMiddleName", index),
+          familyName: field("additionalFamilyName", index),
+          fullName: [
+            field("additionalFirstName", index),
+            field("additionalMiddleName", index),
+            field("additionalFamilyName", index),
+          ].filter(Boolean).join(" "),
+          preferredName: field("additionalPreferredName", index),
+          dateOfBirth: field("additionalDateOfBirth", index),
+          gender: field("additionalGender", index),
+          email,
+          phone,
+          preferredLanguage: field("additionalPreferredLanguage", index),
+          communicationConsent: Boolean(email.trim() || phone.trim()) &&
+            field("additionalCommunicationConsent", index) === "yes",
+          address: addressMode === "same" ? headAddress.address : field("additionalAddress", index),
+          postalCode: addressMode === "same" ? headAddress.postalCode : field("additionalPostalCode", index),
+          city: addressMode === "same" ? headAddress.city : field("additionalCity", index),
+          country: addressMode === "same" ? headAddress.country : field("additionalCountry", index),
+          status: "active",
+          statusNote: "",
+          joinedOn: "",
+          notes: "",
+        },
+      };
+    });
+    const useHeadAddress = form.get("householdUseHeadAddress") === "on";
+    newHousehold = {
+      name: String(form.get("householdName") ?? ""),
+      email: String(form.get("householdEmail") ?? ""),
+      phone: String(form.get("householdPhone") ?? ""),
+      address: useHeadAddress ? headAddress.address : String(form.get("householdAddress") ?? ""),
+      postalCode: useHeadAddress ? headAddress.postalCode : String(form.get("householdPostalCode") ?? ""),
+      city: useHeadAddress ? headAddress.city : String(form.get("householdCity") ?? ""),
+      country: useHeadAddress ? headAddress.country : String(form.get("householdCountry") ?? ""),
+      additionalMembers,
+    };
+  }
   const result = await saveMember(
     getAppEnv().DB,
     context.get(adminEmailContext),
@@ -61,10 +151,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       familyName,
       dateOfBirth: String(form.get("dateOfBirth") ?? ""),
       gender: String(form.get("gender") ?? ""),
-      address: String(form.get("address") ?? ""),
-      postalCode: String(form.get("postalCode") ?? ""),
-      city: String(form.get("city") ?? ""),
-      country: String(form.get("country") ?? ""),
+      ...headAddress,
       preferredLanguage: String(form.get("preferredLanguage") ?? ""),
       communicationConsent: form.get("communicationConsent") === "on",
       email: String(form.get("email") ?? ""),
@@ -79,7 +166,8 @@ export async function action({ request, context }: Route.ActionArgs) {
     groupIds,
     new Date(),
     Object.fromEntries(groupIds.map((groupId) => [groupId, String(form.get(`groupRole:${groupId}`) ?? "member")])),
-    String(form.get("householdRole") ?? "partner"),
+    String(form.get("householdRole") ?? "head"),
+    newHousehold,
   );
   if (result.ok) throw redirect(`/admin/members/${result.id}`);
   return result;
@@ -91,6 +179,7 @@ export default function NewMember({ loaderData, actionData }: Route.ComponentPro
       <h1 className="mb-6 text-gradient-brand text-2xl font-bold tracking-tight sm:text-[1.75rem]">Add a member</h1>
       <MemberEditor
         member={loaderData.member}
+        isNew
         households={loaderData.households}
         groups={loaderData.groups}
         currentHousehold={null}

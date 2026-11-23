@@ -8,6 +8,12 @@ import {
 } from "./approvals.server";
 import { MAX_COMMUNICATION_BATCH_RECIPIENTS } from "./communication-constants";
 import { auditStatement } from "./db.server";
+import {
+  EMAIL_TEMPLATE_INPUT_FIELDS,
+  inferEmailTemplateInputFields,
+  isEmailTemplateInputField,
+  renderEmailTemplate,
+} from "./email-template";
 
 export interface EmailTemplateRow {
   id: number;
@@ -18,6 +24,7 @@ export interface EmailTemplateRow {
   kind: string;
   is_system: number;
   is_active: number;
+  input_fields_json: string | null;
 }
 
 export interface OutboundEmail {
@@ -33,30 +40,7 @@ export type QueueCommunicationBatchResult =
   | { ok: true; communicationId: number; recipientCount: number; message: string }
   | { ok: false; communicationId: 0; recipientCount: 0; message: string };
 
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function renderTemplate(template: Pick<EmailTemplateRow, "subject" | "html" | "text">, fields: Record<string, string>) {
-  const replace = (value: string, html = false) =>
-    value.replace(/\{\{\{(\w+)\}\}\}|\{\{(\w+)\}\}/g, (match, rawKey, escapedKey) => {
-      const key = rawKey ?? escapedKey;
-      if (fields[key] === undefined) return match;
-      return html && !rawKey ? escapeHtml(fields[key]) : fields[key];
-    });
-  return {
-    subject: replace(template.subject),
-    html: replace(template.html, true),
-    text: replace(template.text ?? ""),
-  };
-}
-
-type RenderedEmailContent = ReturnType<typeof renderTemplate>;
+type RenderedEmailContent = ReturnType<typeof renderEmailTemplate>;
 interface QueuedRecipientData {
   [key: string]: string | RenderedEmailContent;
   unsubscribe_url: string;
@@ -66,7 +50,7 @@ interface QueuedRecipientData {
 export async function listEmailTemplates(db: D1Database, activeOnly = false) {
   const { results } = await db
     .prepare(
-      `SELECT id, name, subject, html, text, kind, is_system, is_active FROM email_templates
+      `SELECT id, name, subject, html, text, kind, is_system, is_active, input_fields_json FROM email_templates
        ${activeOnly ? "WHERE is_active = 1" : ""}
        ORDER BY name`,
     )
@@ -74,10 +58,69 @@ export async function listEmailTemplates(db: D1Database, activeOnly = false) {
   return results;
 }
 
+export async function deleteEmailTemplate(
+  db: D1Database,
+  actorRaw: string,
+  id: number,
+  now = new Date(),
+) {
+  if (!Number.isSafeInteger(id) || id < 1) {
+    return { ok: false as const, message: "Select an email template to delete." };
+  }
+  const template = await db.prepare(
+    `SELECT id, name, is_active,
+            (SELECT COUNT(*) FROM send_queue WHERE template_id = email_templates.id) AS reference_count
+     FROM email_templates WHERE id = ?`,
+  ).bind(id).first<{
+    id: number;
+    name: string;
+    is_active: number;
+    reference_count: number;
+  }>();
+  if (!template) return { ok: false as const, message: "Email template not found." };
+  if (template.is_active !== 0) {
+    return { ok: false as const, message: "Deactivate this template before deleting it." };
+  }
+  if (template.reference_count > 0) {
+    return {
+      ok: false as const,
+      message: `This template has ${template.reference_count} queue ${template.reference_count === 1 ? "record" : "records"} and must remain for message history.`,
+    };
+  }
+
+  const result = await db.prepare(
+    `DELETE FROM email_templates
+     WHERE id = ? AND is_active = 0
+       AND NOT EXISTS (SELECT 1 FROM send_queue WHERE template_id = email_templates.id)`,
+  ).bind(id).run();
+  if ((result.meta.changes ?? 0) !== 1) {
+    return { ok: false as const, message: "This template changed while deleting. Refresh the page and try again." };
+  }
+
+  await auditStatement(
+    db,
+    actorRaw,
+    "communication.template.delete",
+    template.name,
+    { templateId: template.id },
+    now.toISOString(),
+  ).run();
+  return { ok: true as const, message: "Inactive email template deleted." };
+}
+
 export async function saveEmailTemplate(
   db: D1Database,
   actorRaw: string,
-  input: { id?: number; name: string; subject: string; html: string; text: string; kind: string; active: boolean },
+  input: {
+    id?: number;
+    name: string;
+    subject: string;
+    html: string;
+    text: string;
+    kind: string;
+    active: boolean;
+    inputFields?: readonly string[];
+  },
   now = new Date(),
 ) {
   const name = input.name.trim().toLowerCase();
@@ -85,30 +128,51 @@ export async function saveEmailTemplate(
   const html = input.html.trim();
   const text = input.text.trim();
   const kind = input.kind.trim() || "general";
+  const inferredFields = inferEmailTemplateInputFields({ subject, html, text });
+  const inputFields = input.inputFields === undefined
+    ? inferredFields
+    : [...new Set(input.inputFields)];
   if (!/^[a-z][a-z0-9_-]{1,39}$/.test(name)) {
     return { ok: false as const, message: "Use a template key with 2-40 lowercase letters, numbers, hyphens, or underscores." };
   }
   if (!subject || subject.length > 200 || !html || html.length > 30000 || text.length > 30000 || kind.length > 40) {
     return { ok: false as const, message: "Enter a subject and HTML body within the listed limits." };
   }
+  if (inputFields.some((field) => !isEmailTemplateInputField(field))) {
+    return { ok: false as const, message: "Choose only supported template input fields." };
+  }
+  const missingInputFields = inferredFields.filter((field) => !inputFields.includes(field));
+  if (missingInputFields.length) {
+    const labels = missingInputFields.map((key) =>
+      EMAIL_TEMPLATE_INPUT_FIELDS.find((field) => field.key === key)!.label,
+    );
+    return {
+      ok: false as const,
+      message: `Enable these template input fields or remove their placeholders: ${labels.join(", ")}.`,
+    };
+  }
+  const inputFieldsJson = JSON.stringify(inputFields);
   const timestamp = now.toISOString();
   try {
     if (input.id) {
       const result = await db.prepare(
         `UPDATE email_templates
-         SET name = ?, subject = ?, html = ?, text = ?, kind = ?, is_active = ?, updated_by = ?, updated_at = ?
+         SET name = ?, subject = ?, html = ?, text = ?, kind = ?, is_active = ?,
+             input_fields_json = ?, updated_by = ?, updated_at = ?
          WHERE id = ?`,
       ).bind(
-        name, subject, html, text, kind, input.active ? 1 : 0, normalizeEmail(actorRaw), timestamp, input.id,
+        name, subject, html, text, kind, input.active ? 1 : 0, inputFieldsJson,
+        normalizeEmail(actorRaw), timestamp, input.id,
       ).run();
       if ((result.meta.changes ?? 0) !== 1) return { ok: false as const, message: "Email template not found." };
     } else {
       await db.prepare(
         `INSERT INTO email_templates
-           (name, subject, html, text, kind, is_system, is_active, updated_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+           (name, subject, html, text, kind, is_system, is_active, input_fields_json, updated_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
       ).bind(
-        name, subject, html, text, kind, input.active ? 1 : 0, normalizeEmail(actorRaw), timestamp, timestamp,
+        name, subject, html, text, kind, input.active ? 1 : 0, inputFieldsJson,
+        normalizeEmail(actorRaw), timestamp, timestamp,
       ).run();
     }
   } catch (error) {
@@ -117,7 +181,14 @@ export async function saveEmailTemplate(
     }
     throw error;
   }
-  await auditStatement(db, actorRaw, "communication.template.save", name, { kind, active: input.active }, timestamp).run();
+  await auditStatement(
+    db,
+    actorRaw,
+    "communication.template.save",
+    name,
+    { kind, active: input.active, inputFields },
+    timestamp,
+  ).run();
   return { ok: true as const, message: "Email template saved." };
 }
 
@@ -170,7 +241,7 @@ export async function queueCommunication(
   if (unsubscribed) return { ok: false as const, id: 0, message: "Recipient has unsubscribed." };
 
   const template = await db.prepare(
-    "SELECT id, name, subject, html, text, kind, is_system, is_active FROM email_templates WHERE name = ? AND is_active = 1",
+    "SELECT id, name, subject, html, text, kind, is_system, is_active, input_fields_json FROM email_templates WHERE name = ? AND is_active = 1",
   ).bind(input.templateName).first<EmailTemplateRow>();
   if (!template) return { ok: false as const, id: 0, message: "Select an active email template." };
 
@@ -194,7 +265,7 @@ export async function queueCommunication(
     email,
     unsubscribe_url: `${input.publicUrl ?? "https://orbit.example.com"}/unsubscribe?email=${encodeURIComponent(email)}`,
   };
-  const rendered = renderTemplate(template, recipientData);
+  const rendered = renderEmailTemplate(template, recipientData);
   if (rendered.subject.length > 200 || rendered.html.length > 60_000 || rendered.text.length > 60_000) {
     return { ok: false as const, id: 0, message: "Rendered message exceeds the allowed size." };
   }
@@ -215,7 +286,7 @@ export async function queueCommunication(
   const unsubscribeHash = await sha256Hex(unsubscribeToken);
   const unsubscribeUrl = `${input.publicUrl ?? "https://orbit.example.com"}/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`;
   recipientData.unsubscribe_url = unsubscribeUrl;
-  const finalRendered = renderTemplate(template, recipientData);
+  const finalRendered = renderEmailTemplate(template, recipientData);
   const result = await db.batch([
     approvalRequestStatement(db, {
       id: approvalId,
@@ -298,7 +369,7 @@ export async function queueCommunicationBatch(
   }
 
   const template = await db.prepare(
-    "SELECT id, name, subject, html, text, kind, is_system, is_active FROM email_templates WHERE name = ? AND is_active = 1",
+    "SELECT id, name, subject, html, text, kind, is_system, is_active, input_fields_json FROM email_templates WHERE name = ? AND is_active = 1",
   ).bind(input.templateName).first<EmailTemplateRow>();
   if (!template) {
     return { ok: false, communicationId: 0, recipientCount: 0, message: "Select an active email template." };
@@ -376,7 +447,7 @@ export async function queueCommunicationBatch(
       email,
       unsubscribe_url: `${input.publicUrl ?? "https://orbit.example.com"}/unsubscribe?token=${encodeURIComponent(token)}`,
     };
-    const rendered = renderTemplate(template, recipientData);
+    const rendered = renderEmailTemplate(template, recipientData);
     if (rendered.subject.length > 200 || rendered.html.length > 60_000 || rendered.text.length > 60_000) {
       return { ok: false, communicationId: 0, recipientCount: 0, message: "Rendered message exceeds the allowed size." };
     }

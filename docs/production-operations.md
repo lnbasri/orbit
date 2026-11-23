@@ -34,6 +34,15 @@ Create new production resources in the intended Cloudflare account; do not reuse
 
 The scheduled backup will not work until the account ID, database ID, export token, and both R2 buckets are configured. Do not put credentials in the repository or chat.
 
+## Administrator access model
+
+- `SUPER_ADMIN` is the organization-wide administrator role and can manage administrator access.
+- Role-based administrators can hold multiple bundles: Membership, Finance, Communications, Document preparer, Approver, and Privacy. Server middleware protects each admin area; approval decisions are restricted to Approvers, not document preparers.
+- Member exports/imports, recipient exports, approved PDF downloads, and personal-data ZIP exports are separate sensitive permissions managed alongside the role bundles.
+- Departments and commissions can be recorded for organizational membership, but they do not grant permissions or scope which records an administrator can see.
+- Existing `ADMIN` accounts without role assignments retain their previous broad access until a super-administrator assigns at least one permission bundle. New role-based administrator accounts require a bundle. The access page flags remaining legacy accounts.
+- These are module-level controls, not field-level redaction. For example, access to the member module includes the personal fields displayed by member profiles; review the data exposed by each module before assigning its role.
+
 ## Backup and recovery
 
 - The backup workflow exports D1 and copies every object in the documents bucket to a timestamped `daily/` prefix in the separate backup bucket.

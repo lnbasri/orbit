@@ -70,6 +70,24 @@ const memberSchema = z
     }
   });
 
+const householdSchema = z.object({
+  name: z.string().trim().min(1, "Household name is required.").max(120),
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .max(254, "Household email is too long.")
+    .pipe(z.union([z.literal(""), z.email("Enter a valid household email address.")]))
+    .default(""),
+  phone: z.string().trim().max(40, "Household phone number is too long.").default(""),
+  address: z.string().trim().max(240),
+  postalCode: z.string().trim().max(20),
+  city: z.string().trim().max(120),
+  country: z.string().trim().max(120),
+  status: z.enum(["active", "inactive"]),
+  statusNote: z.string().trim().max(2000),
+});
+
 export type MemberInput = z.infer<typeof memberSchema>;
 export type MemberStatus = MemberInput["status"];
 
@@ -100,10 +118,16 @@ export interface MemberRow {
   archived_at: string | null;
 }
 
+export interface CommunicationRecipientRow extends MemberRow {
+  household_name: string | null;
+}
+
 export interface HouseholdRow {
   id: string;
   name: string;
   head_member_id: string | null;
+  email: string | null;
+  phone: string | null;
   address: string | null;
   postal_code: string | null;
   city: string | null;
@@ -195,6 +219,20 @@ export type SaveMemberResult =
 export type SaveEntityResult =
   | { ok: false; message: string }
   | { ok: true; id: string; message: string };
+
+function householdNameKey(name: string) {
+  return name.trim().replace(/[A-Z]/g, (character) => character.toLowerCase());
+}
+
+function isHouseholdNameConflict(error: unknown) {
+  return error instanceof Error && error.message.includes("uq_households_name_normalized");
+}
+
+function householdNameConflictMessage(suggestedName?: string) {
+  return suggestedName
+    ? `A household with that name already exists. Try "${suggestedName}" if it is not already in use, or choose another unique name.`
+    : "A household with that name already exists. Choose another unique name.";
+}
 
 export async function listMembers(db: D1Database, filters: MemberFilters) {
   const where: string[] = [
@@ -798,6 +836,16 @@ export async function saveMember(
   now = new Date(),
   groupRoles: Record<string, string> = {},
   householdRole = "partner",
+  newHousehold?: {
+    name: string;
+    email?: string;
+    phone?: string;
+    address: string;
+    postalCode: string;
+    city: string;
+    country: string;
+    additionalMembers: { role: string; member: unknown }[];
+  },
 ): Promise<SaveMemberResult> {
   const parsed = memberSchema.safeParse(raw);
   if (!parsed.success)
@@ -817,17 +865,91 @@ export async function saveMember(
   if (generatedFullName) value.fullName = generatedFullName;
   const timestamp = now.toISOString();
   const uniqueGroupIds = [...new Set(groupIds.filter(Boolean))];
+  let householdDetails: z.infer<typeof householdSchema> | null = null;
+  const additionalMembers: { role: "partner" | "child"; member: MemberInput }[] = [];
+  if (newHousehold) {
+    if (id || householdId || householdRole !== "head") {
+      return { ok: false, message: "A new household can only be created with a new head member." };
+    }
+    if (newHousehold.additionalMembers.length > 8) {
+      return { ok: false, message: "A household can include up to 8 additional members at a time." };
+    }
+    const parsedHousehold = householdSchema.safeParse({
+      ...newHousehold,
+      status: "active",
+      statusNote: "",
+    });
+    if (!parsedHousehold.success) {
+      return {
+        ok: false,
+        message: parsedHousehold.error.issues[0]?.message ?? "Household data is invalid.",
+      };
+    }
+    householdDetails = parsedHousehold.data;
+    let partnerCount = 0;
+    for (const [index, additional] of newHousehold.additionalMembers.entries()) {
+      if (additional.role !== "partner" && additional.role !== "child") {
+        return { ok: false, message: `Choose partner or child for household member ${index + 1}.` };
+      }
+      if (additional.role === "partner") partnerCount++;
+      const parsedAdditional = memberSchema.safeParse(additional.member);
+      if (!parsedAdditional.success) {
+        return {
+          ok: false,
+          message: `Household member ${index + 1}: ${parsedAdditional.error.issues[0]?.message ?? "Member data is invalid."}`,
+        };
+      }
+      const additionalValue = parsedAdditional.data;
+      if (
+        additionalValue.communicationConsent &&
+        !additionalValue.email &&
+        !additionalValue.phone
+      ) {
+        return {
+          ok: false,
+          message: `Household member ${index + 1}: communication consent requires an email address or phone number.`,
+        };
+      }
+      const additionalFullName = [
+        additionalValue.firstName,
+        additionalValue.middleName,
+        additionalValue.familyName,
+      ].filter(Boolean).join(" ").trim();
+      if (additionalFullName) additionalValue.fullName = additionalFullName;
+      additionalMembers.push({ role: additional.role, member: additionalValue });
+    }
+    if (partnerCount > 1) {
+      return { ok: false, message: "A household can have only one partner." };
+    }
+  }
+
+  const assignedHouseholdId = householdDetails ? crypto.randomUUID() : householdId;
   const [member, households, allGroups] = await Promise.all([
     id ? getMember(db, id) : Promise.resolve(null),
     listHouseholds(db),
     listGroups(db),
   ]);
   if (id && !member) return { ok: false, message: "Member not found." };
-  if (householdId && !households.some((h) => h.id === householdId)) {
+  const requestedHouseholdName = householdDetails?.name;
+  if (
+    requestedHouseholdName &&
+    households.some(
+      (household) =>
+        householdNameKey(household.name) === householdNameKey(requestedHouseholdName),
+    )
+  ) {
+    return {
+      ok: false,
+      message: householdNameConflictMessage(
+        [value.firstName, value.familyName].filter(Boolean).join(" "),
+      ),
+    };
+  }
+  if (assignedHouseholdId && !householdDetails && !households.some((h) => h.id === assignedHouseholdId)) {
     return { ok: false, message: "The selected household was not found." };
   }
-  if (householdId) {
-    const household = households.find((item) => item.id === householdId);
+  if (assignedHouseholdId && !householdDetails) {
+    const household = households.find((item) => item.id === assignedHouseholdId);
     if (household?.status !== "active") {
       return {
         ok: false,
@@ -838,24 +960,24 @@ export async function saveMember(
       return { ok: false, message: "Select a valid household role." };
     }
   }
-  if (householdId && householdRole === "partner") {
+  if (assignedHouseholdId && !householdDetails && householdRole === "partner") {
     const partner = await db
       .prepare(
         `SELECT member_id FROM member_households
          WHERE household_id = ? AND role = 'partner' AND valid_until IS NULL AND member_id <> ?`,
       )
-      .bind(householdId, id ?? "")
+      .bind(assignedHouseholdId, id ?? "")
       .first<{ member_id: string }>();
     if (partner)
       return { ok: false, message: "This household already has one partner." };
   }
-  if (householdId && householdRole === "head") {
+  if (assignedHouseholdId && !householdDetails && householdRole === "head") {
     const head = await db
       .prepare(
         `SELECT member_id FROM member_households
          WHERE household_id = ? AND role = 'head' AND valid_until IS NULL AND member_id <> ?`,
       )
-      .bind(householdId, id ?? "")
+      .bind(assignedHouseholdId, id ?? "")
       .first<{ member_id: string }>();
     if (head)
       return { ok: false, message: "This household already has one head." };
@@ -886,36 +1008,35 @@ export async function saveMember(
     : (member?.communication_consent_updated_at ?? null);
   const changes = member
     ? diffMember(member, value, consentUpdatedAt)
-    : {
-        full_name: { from: null, to: value.fullName },
-        preferred_name: { from: null, to: value.preferredName || null },
-        first_name: { from: null, to: value.firstName || null },
-        middle_name: { from: null, to: value.middleName || null },
-        family_name: { from: null, to: value.familyName || null },
-        date_of_birth: { from: null, to: value.dateOfBirth || null },
-        gender: { from: null, to: value.gender || null },
-        address: { from: null, to: value.address || null },
-        postal_code: { from: null, to: value.postalCode || null },
-        city: { from: null, to: value.city || null },
-        country: { from: null, to: value.country || null },
-        preferred_language: { from: null, to: value.preferredLanguage || null },
-        communication_consent: {
-          from: null,
-          to: value.communicationConsent ? 1 : 0,
-        },
-        communication_consent_updated_at: {
-          from: null,
-          to: consentChanged ? consentUpdatedAt : null,
-        },
-        email: { from: null, to: value.email || null },
-        phone: { from: null, to: value.phone || null },
-        status: { from: null, to: value.status },
-        status_note: { from: null, to: value.statusNote || null },
-        joined_on: { from: null, to: value.joinedOn || null },
-        notes: { from: null, to: value.notes || null },
-      };
+    : initialMemberChanges(value, consentUpdatedAt);
 
   const statements: D1PreparedStatement[] = [];
+  if (householdDetails) {
+    statements.push(
+      db.prepare(
+        `INSERT INTO households (id, name, email, phone, address, postal_code, city, country, status, status_note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        assignedHouseholdId,
+        householdDetails.name,
+        householdDetails.email || null,
+        householdDetails.phone || null,
+        householdDetails.address || null,
+        householdDetails.postalCode || null,
+        householdDetails.city || null,
+        householdDetails.country || null,
+        householdDetails.status,
+        householdDetails.statusNote || null,
+        timestamp,
+        timestamp,
+      ),
+      auditStatement(db, actor, "household.create", assignedHouseholdId, {
+        name: householdDetails.name,
+        status: householdDetails.status,
+        statusNote: householdDetails.statusNote || null,
+      }, timestamp),
+    );
+  }
   if (member) {
     statements.push(
       db
@@ -953,42 +1074,7 @@ export async function saveMember(
         ),
     );
   } else {
-    statements.push(
-      db
-        .prepare(
-          `INSERT INTO members
-           (id, full_name, preferred_name, first_name, middle_name, family_name,
-            date_of_birth, gender, address, postal_code, city, country,
-            preferred_language, communication_consent, email, phone, status, status_note,
-            communication_consent_updated_at, joined_on, notes, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          memberId,
-          value.fullName,
-          value.preferredName || null,
-          value.firstName || null,
-          value.middleName || null,
-          value.familyName || null,
-          value.dateOfBirth || null,
-          value.gender || null,
-          value.address || null,
-          value.postalCode || null,
-          value.city || null,
-          value.country || null,
-          value.preferredLanguage || null,
-          value.communicationConsent ? 1 : 0,
-          value.email || null,
-          value.phone || null,
-          value.status,
-          value.statusNote || null,
-          consentUpdatedAt,
-          value.joinedOn || null,
-          value.notes || null,
-          timestamp,
-          timestamp,
-        ),
-    );
+    statements.push(memberInsertStatement(db, memberId, value, timestamp, consentUpdatedAt));
   }
 
   if (Object.keys(changes).length) {
@@ -1005,7 +1091,7 @@ export async function saveMember(
       db,
       actor,
       memberId,
-      householdId,
+      assignedHouseholdId,
       householdRole,
       timestamp,
     )),
@@ -1032,9 +1118,39 @@ export async function saveMember(
       ),
     );
   }
+  for (const additional of additionalMembers) {
+    const additionalId = crypto.randomUUID();
+    const additionalConsentUpdatedAt = additional.member.communicationConsent ? timestamp : null;
+    const additionalChanges = initialMemberChanges(additional.member, additionalConsentUpdatedAt);
+    statements.push(
+      memberInsertStatement(db, additionalId, additional.member, timestamp, additionalConsentUpdatedAt),
+      db.prepare(
+        "INSERT INTO member_history (member_id, changed_at, changed_by, changes_json) VALUES (?, ?, ?, ?)",
+      ).bind(additionalId, timestamp, actor, JSON.stringify(additionalChanges)),
+      ...(await householdAssignmentStatements(
+        db,
+        actor,
+        additionalId,
+        assignedHouseholdId,
+        additional.role,
+        timestamp,
+      )),
+      auditStatement(db, actor, "member.create", additionalId, {
+        fields: Object.keys(additionalChanges),
+      }, timestamp),
+    );
+  }
   try {
     await db.batch(statements);
   } catch (error) {
+    if (isHouseholdNameConflict(error)) {
+      return {
+        ok: false,
+        message: householdNameConflictMessage(
+          [value.firstName, value.familyName].filter(Boolean).join(" "),
+        ),
+      };
+    }
     if (
       error instanceof Error &&
       error.message.includes("UNIQUE constraint failed: member_households.")
@@ -1093,6 +1209,78 @@ function diffMember(
     Object.entries(fields)
       .filter(([, [before, after]]) => before !== after)
       .map(([key, [before, after]]) => [key, { from: before, to: after }]),
+  );
+}
+
+function initialMemberChanges(value: MemberInput, consentUpdatedAt: string | null) {
+  return {
+    full_name: { from: null, to: value.fullName },
+    preferred_name: { from: null, to: value.preferredName || null },
+    first_name: { from: null, to: value.firstName || null },
+    middle_name: { from: null, to: value.middleName || null },
+    family_name: { from: null, to: value.familyName || null },
+    date_of_birth: { from: null, to: value.dateOfBirth || null },
+    gender: { from: null, to: value.gender || null },
+    address: { from: null, to: value.address || null },
+    postal_code: { from: null, to: value.postalCode || null },
+    city: { from: null, to: value.city || null },
+    country: { from: null, to: value.country || null },
+    preferred_language: { from: null, to: value.preferredLanguage || null },
+    communication_consent: {
+      from: null,
+      to: value.communicationConsent ? 1 : 0,
+    },
+    communication_consent_updated_at: {
+      from: null,
+      to: consentUpdatedAt,
+    },
+    email: { from: null, to: value.email || null },
+    phone: { from: null, to: value.phone || null },
+    status: { from: null, to: value.status },
+    status_note: { from: null, to: value.statusNote || null },
+    joined_on: { from: null, to: value.joinedOn || null },
+    notes: { from: null, to: value.notes || null },
+  };
+}
+
+function memberInsertStatement(
+  db: D1Database,
+  memberId: string,
+  value: MemberInput,
+  timestamp: string,
+  consentUpdatedAt: string | null,
+) {
+  return db.prepare(
+    `INSERT INTO members
+     (id, full_name, preferred_name, first_name, middle_name, family_name,
+      date_of_birth, gender, address, postal_code, city, country,
+      preferred_language, communication_consent, email, phone, status, status_note,
+      communication_consent_updated_at, joined_on, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    memberId,
+    value.fullName,
+    value.preferredName || null,
+    value.firstName || null,
+    value.middleName || null,
+    value.familyName || null,
+    value.dateOfBirth || null,
+    value.gender || null,
+    value.address || null,
+    value.postalCode || null,
+    value.city || null,
+    value.country || null,
+    value.preferredLanguage || null,
+    value.communicationConsent ? 1 : 0,
+    value.email || null,
+    value.phone || null,
+    value.status,
+    value.statusNote || null,
+    consentUpdatedAt,
+    value.joinedOn || null,
+    value.notes || null,
+    timestamp,
+    timestamp,
   );
 }
 
@@ -1283,6 +1471,8 @@ export async function saveHousehold(
   actor: string,
   input: {
     name: string;
+    email?: string;
+    phone?: string;
     address: string;
     postalCode: string;
     city: string;
@@ -1293,17 +1483,7 @@ export async function saveHousehold(
   id?: string,
   now = new Date(),
 ): Promise<SaveEntityResult> {
-  const parsed = z
-    .object({
-      name: z.string().trim().min(1, "Household name is required.").max(120),
-      address: z.string().trim().max(240),
-      postalCode: z.string().trim().max(20),
-      city: z.string().trim().max(120),
-      country: z.string().trim().max(120),
-      status: z.enum(["active", "inactive"]),
-      statusNote: z.string().trim().max(2000),
-    })
-    .safeParse(input);
+  const parsed = householdSchema.safeParse(input);
   if (!parsed.success)
     return {
       ok: false,
@@ -1319,64 +1499,84 @@ export async function saveHousehold(
   ) {
     return { ok: false, message: "Household not found." };
   }
+  const duplicate = await db
+    .prepare(
+      "SELECT 1 FROM households WHERE lower(trim(name)) = lower(trim(?)) AND (? IS NULL OR id <> ?)",
+    )
+    .bind(parsed.data.name, id ?? null, id ?? null)
+    .first();
+  if (duplicate) {
+    return { ok: false, message: householdNameConflictMessage() };
+  }
   const timestamp = now.toISOString();
-  const { name, address, postalCode, city, country, status, statusNote } =
+  const { name, email, phone, address, postalCode, city, country, status, statusNote } =
     parsed.data;
-  await db.batch(
-    id
-      ? [
-          db
-            .prepare(
-              "UPDATE households SET name = ?, address = ?, postal_code = ?, city = ?, country = ?, status = ?, status_note = ?, updated_at = ? WHERE id = ?",
-            )
-            .bind(
-              name,
-              address || null,
-              postalCode || null,
-              city || null,
-              country || null,
-              status,
-              statusNote || null,
-              timestamp,
+  try {
+    await db.batch(
+      id
+        ? [
+            db
+              .prepare(
+                "UPDATE households SET name = ?, email = ?, phone = ?, address = ?, postal_code = ?, city = ?, country = ?, status = ?, status_note = ?, updated_at = ? WHERE id = ?",
+              )
+              .bind(
+                name,
+                email || null,
+                phone || null,
+                address || null,
+                postalCode || null,
+                city || null,
+                country || null,
+                status,
+                statusNote || null,
+                timestamp,
+                id,
+              ),
+            auditStatement(
+              db,
+              actor,
+              "household.update",
               id,
+              { name, status, statusNote: statusNote || null },
+              timestamp,
             ),
-          auditStatement(
-            db,
-            actor,
-            "household.update",
-            id,
-            { name, status, statusNote: statusNote || null },
-            timestamp,
-          ),
-        ]
-      : [
-          db
-            .prepare(
-              `INSERT INTO households (id, name, address, postal_code, city, country, status, status_note, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .bind(
+          ]
+        : [
+            db
+              .prepare(
+                `INSERT INTO households (id, name, email, phone, address, postal_code, city, country, status, status_note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              )
+              .bind(
+                householdId,
+                name,
+                email || null,
+                phone || null,
+                address || null,
+                postalCode || null,
+                city || null,
+                country || null,
+                status,
+                statusNote || null,
+                timestamp,
+                timestamp,
+              ),
+            auditStatement(
+              db,
+              actor,
+              "household.create",
               householdId,
-              name,
-              address || null,
-              postalCode || null,
-              city || null,
-              country || null,
-              status,
-              statusNote || null,
-              timestamp,
+              { name, status, statusNote: statusNote || null },
               timestamp,
             ),
-          auditStatement(
-            db,
-            actor,
-            "household.create",
-            householdId,
-            { name, status, statusNote: statusNote || null },
-            timestamp,
-          ),
-        ],
-  );
+          ],
+    );
+  } catch (error) {
+    if (isHouseholdNameConflict(error)) {
+      return { ok: false, message: householdNameConflictMessage() };
+    }
+    throw error;
+  }
   return {
     ok: true,
     id: householdId,
@@ -2302,7 +2502,7 @@ export async function getCommunicationRecipients(
     q?: string;
     groupId?: string;
   } = {},
-): Promise<MemberRow[]> {
+): Promise<CommunicationRecipientRow[]> {
   const groupId = filters.groupId?.trim();
   const status =
     filters.status === undefined
@@ -2335,7 +2535,12 @@ export async function getCommunicationRecipients(
   }
   const candidateFilter = candidateFilters.length ? ` AND ${candidateFilters.join(" AND ")}` : "";
 
-  let query = `SELECT m.* FROM members m
+  let query = `SELECT m.*,
+      (SELECT h.name FROM member_households mh
+       JOIN households h ON h.id = mh.household_id
+       WHERE mh.member_id = m.id AND mh.valid_until IS NULL
+       ORDER BY mh.valid_from DESC LIMIT 1) AS household_name
+    FROM members m
     WHERE m.archived_at IS NULL AND m.communication_consent = 1
       AND m.status <> 'deceased'
       AND m.id = (
@@ -2372,7 +2577,7 @@ export async function getCommunicationRecipients(
   }
 
   query += " ORDER BY m.full_name";
-  const results = await db.prepare(query).bind(...params).all<MemberRow>();
+  const results = await db.prepare(query).bind(...params).all<CommunicationRecipientRow>();
   return results.results;
 }
 

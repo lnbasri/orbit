@@ -3,7 +3,8 @@ import { data, Link } from "react-router";
 import { buttonClass } from "~/components/ui";
 import type { Route } from "./+types/member";
 import { MemberEditor } from "~/components/MemberEditor";
-import { adminEmailContext } from "~/lib/admin-context";
+import { adminAccessContext, adminEmailContext } from "~/lib/admin-context";
+import { hasAdminModule } from "~/lib/admin-access";
 import { getAppEnv } from "~/lib/env.server";
 import {
   addMemberRelationship,
@@ -16,8 +17,9 @@ import {
   setMemberArchived,
 } from "~/lib/members.server";
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, context }: Route.LoaderArgs) {
   const db = getAppEnv().DB;
+  const access = context.get(adminAccessContext);
   const id = params.id;
   const [profile, households, groups, otherMembers] = await Promise.all([
     getMemberProfile(db, id),
@@ -27,7 +29,14 @@ export async function loader({ params }: Route.LoaderArgs) {
   ]);
   const member = profile.member;
   if (!member) throw data("Member not found.", { status: 404 });
-  return { ...profile, member, households, allGroups: groups, otherMembers };
+  return {
+    ...profile,
+    member,
+    households,
+    allGroups: groups,
+    otherMembers,
+    canManagePrivacy: hasAdminModule(access, "privacy"),
+  };
 }
 
 export async function action({ request, context, params }: Route.ActionArgs) {
@@ -112,12 +121,12 @@ export default function MemberProfile({ loaderData, actionData }: Route.Componen
         <h1 className="text-gradient-brand text-2xl font-bold tracking-tight sm:text-[1.75rem]">
           {loaderData.member.full_name}
         </h1>
-        <Link
+        {loaderData.canManagePrivacy ? <Link
           to={`/admin/privacy?memberId=${encodeURIComponent(loaderData.member.id)}`}
           className={buttonClass("secondary", "md")}
         >
           Record privacy request
-        </Link>
+        </Link> : null}
       </div>
       <MemberEditor
         member={loaderData.member}
