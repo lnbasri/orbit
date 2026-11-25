@@ -18,3 +18,5 @@ worker-configuration.d.ts
 
 # Test artefacts
 /test-output/
+/test*.log
+/tsc-result*.log
